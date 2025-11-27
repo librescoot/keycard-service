@@ -18,21 +18,24 @@ const (
 )
 
 type Config struct {
-	Device    string
-	DataDir   string
-	RedisAddr string
-	Debug     bool
-	LogLevel  int
+	Device      string
+	DataDir     string
+	RedisAddr   string
+	Debug       bool
+	LogLevel    int
+	LEDDevice   string // I2C device for LP5662, empty for shell scripts
+	LEDAddress  uint8  // I2C address for LP5662
 }
 
 type Service struct {
 	config *Config
 	logger *slog.Logger
 
-	nfc   *hal.PN7150
-	auth  *AuthManager
-	led   *LEDController
-	redis *RedisClient
+	nfc       *hal.PN7150
+	auth      *AuthManager
+	rgbLed    RGBLed         // RGB LED for feedback (LP5662 or script-based)
+	linearLed *LEDController // Linear LEDs for learn mode indicators
+	redis     *RedisClient
 
 	masterLearningMode bool
 	learnMode          bool
@@ -60,7 +63,22 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
 
-	s.led = NewLEDController(logger)
+	// Initialize LED controllers
+	s.linearLed = NewLEDController(logger)
+
+	if config.LEDDevice != "" {
+		// Use LP5662 RGB LED driver
+		lp5662, err := NewLP5662(config.LEDDevice, config.LEDAddress, logger)
+		if err != nil {
+			logger.Warn("Failed to initialize LP5662, falling back to script-based LED", "error", err)
+			s.rgbLed = s.linearLed
+		} else {
+			s.rgbLed = lp5662
+		}
+	} else {
+		// Use script-based LED control
+		s.rgbLed = s.linearLed
+	}
 
 	s.redis = NewRedisClient(config.RedisAddr, logger)
 
@@ -124,8 +142,9 @@ func (s *Service) Run() error {
 
 func (s *Service) Stop() {
 	s.cancel()
-	s.led.StopBlink()
-	s.led.GreenOff()
+	if s.rgbLed != nil {
+		s.rgbLed.Close()
+	}
 	if s.nfc != nil {
 		s.nfc.Deinitialize()
 	}
@@ -212,7 +231,7 @@ func (s *Service) handleTagArrival(uid string) {
 func (s *Service) enterMasterLearningMode() {
 	s.logger.Info("Entering master learning mode - present master card")
 	s.masterLearningMode = true
-	s.led.StartBlink(blinkInterval)
+	s.rgbLed.StartBlink(blinkInterval)
 }
 
 func (s *Service) learnMasterUID(uid string) {
@@ -224,8 +243,8 @@ func (s *Service) learnMasterUID(uid string) {
 	}
 
 	s.masterLearningMode = false
-	s.led.StopBlink()
-	s.led.GreenFlash(flashDuration)
+	s.rgbLed.StopBlink()
+	s.rgbLed.Flash(flashDuration)
 
 	s.logger.Info("Master UID learned successfully", "uid", uid)
 }
@@ -234,8 +253,8 @@ func (s *Service) enterLearnMode() {
 	s.logger.Info("Entering learn mode - present cards to authorize")
 	s.learnMode = true
 	s.newUIDs = nil
-	s.led.LedLinearOn(Led3)
-	s.led.LedLinearOn(Led7)
+	s.linearLed.LedLinearOn(Led3)
+	s.linearLed.LedLinearOn(Led7)
 }
 
 func (s *Service) exitLearnMode() {
@@ -244,8 +263,8 @@ func (s *Service) exitLearnMode() {
 		"totalAuthorized", s.auth.GetAuthorizedCount())
 
 	s.learnMode = false
-	s.led.LedLinearOff(Led3)
-	s.led.LedLinearOff(Led7)
+	s.linearLed.LedLinearOff(Led3)
+	s.linearLed.LedLinearOff(Led7)
 	s.newUIDs = nil
 }
 
@@ -258,7 +277,7 @@ func (s *Service) learnUID(uid string) {
 
 	if added {
 		s.newUIDs = append(s.newUIDs, uid)
-		s.led.GreenFlash(flashDuration)
+		s.rgbLed.Flash(flashDuration)
 		s.logger.Info("UID authorized", "uid", uid)
 	} else {
 		s.logger.Info("UID already authorized", "uid", uid)
@@ -267,7 +286,7 @@ func (s *Service) learnUID(uid string) {
 
 func (s *Service) grantAccess(uid string) {
 	s.logger.Info("Access granted", "uid", uid)
-	s.led.GreenFlash(flashDuration)
+	s.rgbLed.Flash(flashDuration)
 
 	if err := s.redis.PublishAuth(uid); err != nil {
 		s.logger.Error("Failed to publish auth to Redis", "error", err)

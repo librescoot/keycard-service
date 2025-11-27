@@ -20,6 +20,16 @@ const (
 	Led7 = 7
 )
 
+// RGBLed interface for RGB LED control (can be LP5662 or script-based)
+type RGBLed interface {
+	On() error
+	Off() error
+	Flash(duration time.Duration)
+	StartBlink(interval time.Duration)
+	StopBlink()
+	Close() error
+}
+
 type LEDController struct {
 	mu        sync.Mutex
 	logger    *slog.Logger
@@ -33,19 +43,27 @@ func NewLEDController(logger *slog.Logger) *LEDController {
 	}
 }
 
-func (l *LEDController) GreenOn() {
+func (l *LEDController) On() error {
 	l.execScript(greenLedScript, "1")
+	return nil
 }
 
-func (l *LEDController) GreenOff() {
+func (l *LEDController) Off() error {
 	l.execScript(greenLedScript, "0")
+	return nil
 }
 
-func (l *LEDController) GreenFlash(duration time.Duration) {
-	l.GreenOn()
+func (l *LEDController) Flash(duration time.Duration) {
+	l.On()
 	time.AfterFunc(duration, func() {
-		l.GreenOff()
+		l.Off()
 	})
+}
+
+func (l *LEDController) Close() error {
+	l.StopBlink()
+	l.Off()
+	return nil
 }
 
 func (l *LEDController) StartBlink(interval time.Duration) {
@@ -67,13 +85,13 @@ func (l *LEDController) StartBlink(interval time.Duration) {
 		for {
 			select {
 			case <-l.blinkStop:
-				l.GreenOff()
+				l.Off()
 				return
 			case <-ticker.C:
 				if state {
-					l.GreenOff()
+					l.Off()
 				} else {
-					l.GreenOn()
+					l.On()
 				}
 				state = !state
 			}
