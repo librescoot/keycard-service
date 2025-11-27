@@ -93,8 +93,8 @@ func NewLP5662(device string, address uint8, logger *slog.Logger) (*LP5662, erro
 }
 
 func (l *LP5662) setSlaveAddress() error {
-	const i2cSlave = 0x0703
-	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(l.fd), i2cSlave, uintptr(l.address))
+	const i2cSlaveForce = 0x0706 // Force access even if kernel driver is bound
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(l.fd), i2cSlaveForce, uintptr(l.address))
 	if errno != 0 {
 		return errno
 	}
