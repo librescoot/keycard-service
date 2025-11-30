@@ -206,6 +206,9 @@ func (s *Service) waitForTagDeparture() {
 func (s *Service) handleTagArrival(uid string) {
 	s.logger.Info("Tag arrived", "uid", uid)
 
+	// Set LED to amber during lookup
+	s.rgbLed.Amber()
+
 	if s.masterLearningMode {
 		s.learnMasterUID(uid)
 		return
@@ -218,6 +221,11 @@ func (s *Service) handleTagArrival(uid string) {
 			s.grantAccess(uid)
 		} else {
 			s.logger.Info("Unauthorized UID", "uid", uid)
+			// Flash red on unauthorized
+			s.rgbLed.Red()
+			time.AfterFunc(flashDuration, func() {
+				s.rgbLed.Off()
+			})
 		}
 	} else {
 		if s.auth.IsMaster(uid) {

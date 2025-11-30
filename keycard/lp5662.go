@@ -44,6 +44,7 @@ var (
 	ColorGreen  = RGB{0, 255, 0}
 	ColorBlue   = RGB{0, 0, 255}
 	ColorYellow = RGB{255, 255, 0}
+	ColorAmber  = RGB{255, 191, 0} // Orange/amber color
 	ColorWhite  = RGB{255, 255, 255}
 )
 
@@ -201,6 +202,16 @@ func (l *LP5662) Green() error {
 // Blue sets the LED to blue
 func (l *LP5662) Blue() error {
 	return l.SetColor(ColorBlue)
+}
+
+// Amber sets the LED to amber/orange
+func (l *LP5662) Amber() error {
+	return l.SetColor(ColorAmber)
+}
+
+// Yellow sets the LED to yellow
+func (l *LP5662) Yellow() error {
+	return l.SetColor(ColorYellow)
 }
 
 // On turns on the LED with the configured color

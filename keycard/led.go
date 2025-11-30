@@ -28,6 +28,10 @@ type RGBLed interface {
 	StartBlink(interval time.Duration)
 	StopBlink()
 	Close() error
+	// Color control (may be no-op for script-based)
+	Red() error
+	Green() error
+	Amber() error
 }
 
 type LEDController struct {
@@ -125,6 +129,22 @@ func (l *LEDController) LedLinearOff(led int) {
 
 func (l *LEDController) LedBlink(led int) {
 	l.Pattern(led, LedModeBlink)
+}
+
+// Color control methods (uses greenled.sh script)
+func (l *LEDController) Red() error {
+	l.execScript(greenLedScript, "red")
+	return nil
+}
+
+func (l *LEDController) Green() error {
+	l.execScript(greenLedScript, "green")
+	return nil
+}
+
+func (l *LEDController) Amber() error {
+	l.execScript(greenLedScript, "amber")
+	return nil
 }
 
 func (l *LEDController) execScript(script string, args ...string) {

@@ -59,7 +59,9 @@ func (am *AuthManager) loadMasterUIDs() error {
 	for scanner.Scan() {
 		uid := strings.TrimSpace(scanner.Text())
 		if uid != "" {
-			am.masterUIDs = append(am.masterUIDs, strings.ToUpper(uid))
+			// Normalize: remove spaces and uppercase
+			uid = strings.ToUpper(strings.ReplaceAll(uid, " ", ""))
+			am.masterUIDs = append(am.masterUIDs, uid)
 		}
 	}
 	return scanner.Err()
@@ -80,7 +82,9 @@ func (am *AuthManager) loadAuthorizedUIDs() error {
 	for scanner.Scan() {
 		uid := strings.TrimSpace(scanner.Text())
 		if uid != "" {
-			am.authorizedUIDs = append(am.authorizedUIDs, strings.ToUpper(uid))
+			// Normalize: remove spaces and uppercase
+			uid = strings.ToUpper(strings.ReplaceAll(uid, " ", ""))
+			am.authorizedUIDs = append(am.authorizedUIDs, uid)
 		}
 	}
 	return scanner.Err()
