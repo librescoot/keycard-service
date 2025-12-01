@@ -14,7 +14,7 @@ import (
 const (
 	discoveryPollPeriod = 500
 	blinkInterval       = 500 * time.Millisecond
-	flashDuration       = 200 * time.Millisecond
+	flashDuration       = 500 * time.Millisecond
 )
 
 type Config struct {
@@ -153,6 +153,13 @@ func (s *Service) Stop() {
 	}
 }
 
+func (s *Service) flashLED(setColor func() error, duration time.Duration) {
+	setColor()
+	time.AfterFunc(duration, func() {
+		s.rgbLed.Off()
+	})
+}
+
 func (s *Service) pollForTag() error {
 	if err := s.nfc.StartDiscovery(discoveryPollPeriod); err != nil {
 		if strings.Contains(err.Error(), "status: 06") {
@@ -202,11 +209,7 @@ func (s *Service) handleTagArrival(uid string) {
 			s.grantAccess(uid)
 		} else {
 			s.logger.Info("Unauthorized UID", "uid", uid)
-			// Flash red on unauthorized
-			s.rgbLed.Red()
-			time.AfterFunc(flashDuration, func() {
-				s.rgbLed.Off()
-			})
+			s.flashLED(s.rgbLed.Red, flashDuration)
 		}
 	} else {
 		if s.auth.IsMaster(uid) {
@@ -275,7 +278,7 @@ func (s *Service) learnUID(uid string) {
 
 func (s *Service) grantAccess(uid string) {
 	s.logger.Info("Access granted", "uid", uid)
-	s.rgbLed.Flash(flashDuration)
+	s.flashLED(s.rgbLed.Green, flashDuration)
 
 	if err := s.redis.PublishAuth(uid); err != nil {
 		s.logger.Error("Failed to publish auth to Redis", "error", err)
