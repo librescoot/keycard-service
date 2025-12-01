@@ -178,29 +178,10 @@ func (s *Service) pollForTag() error {
 		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
 		s.logger.Debug("Tag detected", "uid", uid)
 		s.handleTagArrival(uid)
-
-		s.waitForTagDeparture()
 	}
 
 	s.nfc.StopDiscovery()
 	return nil
-}
-
-func (s *Service) waitForTagDeparture() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-		}
-
-		tags, err := s.nfc.DetectTags()
-		if err != nil || len(tags) == 0 {
-			s.logger.Debug("Tag departed")
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
 }
 
 func (s *Service) handleTagArrival(uid string) {
