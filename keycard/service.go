@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	discoveryPollPeriod = 500
-	blinkInterval       = 500 * time.Millisecond
-	flashDuration       = 500 * time.Millisecond
+	discoveryPollPeriod   = 500
+	blinkInterval         = 500 * time.Millisecond
+	flashDuration         = 500 * time.Millisecond
+	departureConfirmPolls = 2 // Require 2 consecutive empty polls to confirm departure
 )
 
 type Config struct {
@@ -41,6 +42,11 @@ type Service struct {
 	learnMode          bool
 	newUIDs            []string
 
+	// Card presence tracking
+	currentCardUID string    // UID of currently present card ("" if none)
+	lastSeenTime   time.Time // Last time current card was detected
+	emptyPollCount int       // Consecutive polls with no card detected
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -49,10 +55,12 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Service{
-		config: config,
-		logger: logger,
-		ctx:    ctx,
-		cancel: cancel,
+		config:         config,
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		currentCardUID: "",
+		emptyPollCount: 0,
 	}
 
 	var err error
@@ -184,16 +192,54 @@ func (s *Service) pollForTag() error {
 	if len(tags) > 0 {
 		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
 		s.logger.Debug("Tag detected", "uid", uid)
-		s.handleTagArrival(uid)
+		s.handleTagDetection(uid)
+	} else {
+		s.handleNoTag()
 	}
 
 	s.nfc.StopDiscovery()
 	return nil
 }
 
-func (s *Service) handleTagArrival(uid string) {
-	s.logger.Info("Tag arrived", "uid", uid)
+func (s *Service) handleTagDetection(uid string) {
+	// Check if this is a NEW card arrival
+	if s.currentCardUID != uid {
+		// Different card - this is a new arrival
+		s.logger.Info("Tag arrived", "uid", uid)
+		s.currentCardUID = uid
+		s.lastSeenTime = time.Now()
+		s.emptyPollCount = 0
+		s.handleTagArrival(uid) // Trigger actual arrival logic
+	} else {
+		// Same card still present - just update tracking
+		s.lastSeenTime = time.Now()
+		s.emptyPollCount = 0
+		s.logger.Debug("Tag still present", "uid", uid)
+	}
+}
 
+func (s *Service) handleNoTag() {
+	if s.currentCardUID == "" {
+		// No card was present before, still no card - nothing to do
+		return
+	}
+
+	// Card was present before, now we see nothing
+	s.emptyPollCount++
+
+	if s.emptyPollCount >= departureConfirmPolls {
+		// Confirmed departure
+		s.logger.Info("Tag departed", "uid", s.currentCardUID)
+		s.currentCardUID = ""
+		s.emptyPollCount = 0
+	} else {
+		s.logger.Debug("Possible tag departure",
+			"uid", s.currentCardUID,
+			"emptyPolls", s.emptyPollCount)
+	}
+}
+
+func (s *Service) handleTagArrival(uid string) {
 	// Set LED to amber during lookup
 	s.rgbLed.Amber()
 
