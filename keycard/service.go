@@ -144,6 +144,9 @@ func (s *Service) Run() error {
 			}
 			s.logger.Warn("Poll error", "error", err)
 			time.Sleep(time.Second)
+		} else {
+			// Small delay between successful polls
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -203,6 +206,7 @@ func (s *Service) pollForTag() error {
 
 func (s *Service) handleTagDetection(uid string) {
 	// Check if this is a NEW card arrival
+	s.logger.Debug("handleTagDetection", "detected_uid", uid, "current_uid", s.currentCardUID, "is_new", s.currentCardUID != uid)
 	if s.currentCardUID != uid {
 		// Different card - this is a new arrival
 		s.logger.Info("Tag arrived", "uid", uid)
