@@ -12,10 +12,8 @@ import (
 )
 
 const (
-	discoveryPollPeriod   = 500
-	blinkInterval         = 500 * time.Millisecond
-	flashDuration         = 500 * time.Millisecond
-	departureConfirmPolls = 2 // Require 2 consecutive empty polls to confirm departure
+	blinkInterval = 500 * time.Millisecond
+	flashDuration = 500 * time.Millisecond
 )
 
 type Config struct {
@@ -130,23 +128,45 @@ func (s *Service) Run() error {
 		s.enterMasterLearningMode()
 	}
 
+	// Enable event-driven detection
+	s.nfc.SetTagEventReaderEnabled(true)
+	defer s.nfc.SetTagEventReaderEnabled(false)
+
+	// Start continuous discovery with short period
+	if err := s.nfc.StartDiscovery(100); err != nil {
+		if strings.Contains(err.Error(), "status: 06") {
+			s.logger.Warn("Discovery failed with semantic error, reinitializing")
+			if err := s.nfc.FullReinitialize(); err != nil {
+				return fmt.Errorf("reinitialization failed: %w", err)
+			}
+			if err := s.nfc.StartDiscovery(100); err != nil {
+				return fmt.Errorf("discovery failed after reinit: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to start discovery: %w", err)
+		}
+	}
+	defer s.nfc.StopDiscovery()
+
+	s.logger.Info("Event-driven tag detection enabled")
+
+	// Event loop
+	eventChan := s.nfc.GetTagEventChannel()
 	for {
 		select {
 		case <-s.ctx.Done():
 			s.logger.Info("Service shutting down")
 			return nil
-		default:
-		}
-
-		if err := s.pollForTag(); err != nil {
-			if s.ctx.Err() != nil {
-				return nil
+		case event, ok := <-eventChan:
+			if !ok {
+				s.logger.Error("Event channel closed unexpectedly")
+				return fmt.Errorf("event channel closed")
 			}
-			s.logger.Warn("Poll error", "error", err)
-			time.Sleep(time.Second)
-		} else {
-			// Small delay between successful polls
-			time.Sleep(100 * time.Millisecond)
+			if event.Error != nil {
+				s.logger.Warn("Tag event error", "error", event.Error)
+				continue
+			}
+			s.handleTagEvent(event)
 		}
 	}
 }
@@ -171,38 +191,19 @@ func (s *Service) flashLED(setColor func() error, duration time.Duration) {
 	})
 }
 
-func (s *Service) pollForTag() error {
-	if err := s.nfc.StartDiscovery(discoveryPollPeriod); err != nil {
-		if strings.Contains(err.Error(), "status: 06") {
-			s.logger.Warn("Discovery failed with semantic error, reinitializing")
-			if err := s.nfc.FullReinitialize(); err != nil {
-				return fmt.Errorf("reinitialization failed: %w", err)
-			}
-			if err := s.nfc.StartDiscovery(discoveryPollPeriod); err != nil {
-				return fmt.Errorf("discovery failed after reinit: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to start discovery: %w", err)
-		}
-	}
-
-	tags, err := s.nfc.DetectTags()
-	if err != nil {
-		s.nfc.StopDiscovery()
-		return fmt.Errorf("failed to detect tags: %w", err)
-	}
-
-	if len(tags) > 0 {
-		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
-		s.logger.Debug("Tag detected", "uid", uid)
+func (s *Service) handleTagEvent(event hal.TagEvent) {
+	switch event.Type {
+	case hal.TagArrival:
+		uid := strings.ToUpper(hex.EncodeToString(event.Tag.ID))
+		s.logger.Debug("Tag event: arrival", "uid", uid)
 		s.handleTagDetection(uid)
-	} else {
-		s.handleNoTag()
-	}
 
-	s.nfc.StopDiscovery()
-	return nil
+	case hal.TagDeparture:
+		s.logger.Debug("Tag event: departure")
+		s.handleTagDeparture()
+	}
 }
+
 
 func (s *Service) handleTagDetection(uid string) {
 	// Check if this is a NEW card arrival
@@ -222,24 +223,11 @@ func (s *Service) handleTagDetection(uid string) {
 	}
 }
 
-func (s *Service) handleNoTag() {
-	if s.currentCardUID == "" {
-		// No card was present before, still no card - nothing to do
-		return
-	}
-
-	// Card was present before, now we see nothing
-	s.emptyPollCount++
-
-	if s.emptyPollCount >= departureConfirmPolls {
-		// Confirmed departure
+func (s *Service) handleTagDeparture() {
+	if s.currentCardUID != "" {
 		s.logger.Info("Tag departed", "uid", s.currentCardUID)
 		s.currentCardUID = ""
 		s.emptyPollCount = 0
-	} else {
-		s.logger.Debug("Possible tag departure",
-			"uid", s.currentCardUID,
-			"emptyPolls", s.emptyPollCount)
 	}
 }
 
