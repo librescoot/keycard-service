@@ -11,6 +11,8 @@ import (
 	"keycard-service/keycard"
 )
 
+var version = "dev"
+
 func main() {
 	var (
 		device     string
@@ -76,7 +78,7 @@ func main() {
 	if ledDevice != "" {
 		ledInfo = fmt.Sprintf("LP5662 at %s:0x%02X", ledDevice, ledAddress)
 	}
-	logger.Info("Starting keycard service",
+	logger.Info(fmt.Sprintf("librescoot-keycard %s starting", version),
 		"device", device,
 		"dataDir", dataDir,
 		"redis", redisAddr,
