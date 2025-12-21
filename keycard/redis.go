@@ -1,12 +1,11 @@
 package keycard
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	ipc "github.com/librescoot/redis-ipc"
 )
 
 const (
@@ -15,20 +14,23 @@ const (
 )
 
 type RedisClient struct {
-	client *redis.Client
+	client *ipc.Client
 	logger *slog.Logger
-	ctx    context.Context
 }
 
-func NewRedisClient(addr string, logger *slog.Logger) *RedisClient {
-	client := redis.NewClient(&redis.Options{
-		Addr: addr,
-	})
+func NewRedisClient(addr string, logger *slog.Logger) (*RedisClient, error) {
+	client, err := ipc.New(
+		ipc.WithURL(addr),
+		ipc.WithLogger(logger),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
 	return &RedisClient{
 		client: client,
 		logger: logger,
-		ctx:    context.Background(),
-	}
+	}, nil
 }
 
 func (r *RedisClient) Close() error {
@@ -36,19 +38,17 @@ func (r *RedisClient) Close() error {
 }
 
 func (r *RedisClient) PublishAuth(uid string) error {
-	pipe := r.client.Pipeline()
-
-	pipe.HSet(r.ctx, keycardHashKey, "authentication", "passed")
-	pipe.HSet(r.ctx, keycardHashKey, "type", "scooter")
-	pipe.HSet(r.ctx, keycardHashKey, "uid", uid)
-	pipe.Publish(r.ctx, keycardHashKey, "authentication")
-	pipe.Expire(r.ctx, keycardHashKey, keycardExpiry)
-
-	_, err := pipe.Exec(r.ctx)
+	err := r.client.Hash(keycardHashKey).SetManyPublishOne(map[string]any{
+		"authentication": "passed",
+		"type":           "scooter",
+		"uid":            uid,
+	}, "authentication")
 	if err != nil {
 		r.logger.Error("Failed to publish auth", "error", err)
 		return fmt.Errorf("failed to publish auth: %w", err)
 	}
+
+	r.client.Expire(keycardHashKey, keycardExpiry)
 
 	r.logger.Info("Published authentication", "uid", uid)
 	return nil

@@ -86,7 +86,11 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		s.rgbLed = s.linearLed
 	}
 
-	s.redis = NewRedisClient(config.RedisAddr, logger)
+	s.redis, err = NewRedisClient(config.RedisAddr, logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create redis client: %w", err)
+	}
 
 	logCallback := func(level hal.LogLevel, message string) {
 		if int(level) > config.LogLevel {
