@@ -31,7 +31,13 @@ func main() {
 	flag.IntVar(&logLevel, "log", 2, "Log level (0=error, 1=warn, 2=info, 3=debug)")
 	flag.StringVar(&ledDevice, "led-device", "", "I2C device for LP5662 RGB LED (empty for shell scripts)")
 	flag.UintVar(&ledAddress, "led-address", 0x30, "I2C address for LP5662 RGB LED")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("keycard-service %s\n", version)
+		return
+	}
 
 	var level slog.Level
 	switch logLevel {
