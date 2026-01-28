@@ -264,14 +264,16 @@ func (l *LP5662) StartBlink(interval time.Duration) {
 // StopBlink stops blinking the LED
 func (l *LP5662) StopBlink() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if !l.blinking {
+		l.mu.Unlock()
 		return
 	}
 
-	close(l.blinkStop)
+	stopChan := l.blinkStop
 	l.blinking = false
+	l.mu.Unlock()
+
+	close(stopChan)
 }
 
 // Close releases the I2C device

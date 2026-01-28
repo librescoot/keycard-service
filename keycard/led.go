@@ -105,14 +105,16 @@ func (l *LEDController) StartBlink(interval time.Duration) {
 
 func (l *LEDController) StopBlink() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if !l.blinking {
+		l.mu.Unlock()
 		return
 	}
 
-	close(l.blinkStop)
+	stopChan := l.blinkStop
 	l.blinking = false
+	l.mu.Unlock()
+
+	close(stopChan)
 }
 
 func (l *LEDController) Pattern(led, mode int) {
