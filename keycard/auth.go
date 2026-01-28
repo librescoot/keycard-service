@@ -178,7 +178,9 @@ func (am *AuthManager) saveMasterUIDs() error {
 	defer f.Close()
 
 	for _, uid := range am.masterUIDs {
-		fmt.Fprintln(f, uid)
+		if _, err := fmt.Fprintln(f, uid); err != nil {
+			return fmt.Errorf("failed to write master UID %s: %w", uid, err)
+		}
 	}
 	return nil
 }
@@ -191,7 +193,9 @@ func (am *AuthManager) saveAuthorizedUIDs() error {
 	defer f.Close()
 
 	for _, uid := range am.authorizedUIDs {
-		fmt.Fprintln(f, uid)
+		if _, err := fmt.Fprintln(f, uid); err != nil {
+			return fmt.Errorf("failed to write authorized UID %s: %w", uid, err)
+		}
 	}
 	return nil
 }
