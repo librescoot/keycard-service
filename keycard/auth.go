@@ -182,6 +182,10 @@ func (am *AuthManager) saveMasterUIDs() error {
 			return fmt.Errorf("failed to write master UID %s: %w", uid, err)
 		}
 	}
+
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("failed to sync master UIDs: %w", err)
+	}
 	return nil
 }
 
@@ -196,6 +200,10 @@ func (am *AuthManager) saveAuthorizedUIDs() error {
 		if _, err := fmt.Fprintln(f, uid); err != nil {
 			return fmt.Errorf("failed to write authorized UID %s: %w", uid, err)
 		}
+	}
+
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("failed to sync authorized UIDs: %w", err)
 	}
 	return nil
 }
