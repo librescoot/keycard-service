@@ -273,6 +273,7 @@ func (s *Service) learnMasterUID(uid string) {
 
 	if err := s.auth.SetMaster(uid); err != nil {
 		s.logger.Error("Failed to save master UID", "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
 		return
 	}
 
@@ -306,6 +307,7 @@ func (s *Service) learnUID(uid string) {
 	added, err := s.auth.AddAuthorized(uid)
 	if err != nil {
 		s.logger.Error("Failed to add authorized UID", "uid", uid, "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
 		return
 	}
 
