@@ -276,11 +276,11 @@ func (l *LP5662) StopBlink() {
 
 // Close releases the I2C device
 func (l *LP5662) Close() error {
+	l.StopBlink()
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Turn off before closing
 	l.setColorLocked(ColorOff)
-
 	return unix.Close(l.fd)
 }
