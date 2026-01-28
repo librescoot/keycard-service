@@ -9,6 +9,33 @@ import (
 	"sync"
 )
 
+// atomicWriteLines writes lines to a file atomically using write-sync-rename pattern.
+func atomicWriteLines(path string, lines []string) error {
+	tmpPath := path + ".tmp"
+
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(f, line); err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			return err
+		}
+	}
+
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	f.Close()
+
+	return os.Rename(tmpPath, path)
+}
+
 type AuthManager struct {
 	mu             sync.RWMutex
 	dataDir        string
@@ -171,39 +198,9 @@ func (am *AuthManager) GetAuthorizedCount() int {
 }
 
 func (am *AuthManager) saveMasterUIDs() error {
-	f, err := os.Create(am.masterFilePath())
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	for _, uid := range am.masterUIDs {
-		if _, err := fmt.Fprintln(f, uid); err != nil {
-			return fmt.Errorf("failed to write master UID %s: %w", uid, err)
-		}
-	}
-
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("failed to sync master UIDs: %w", err)
-	}
-	return nil
+	return atomicWriteLines(am.masterFilePath(), am.masterUIDs)
 }
 
 func (am *AuthManager) saveAuthorizedUIDs() error {
-	f, err := os.Create(am.authorizedFilePath())
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	for _, uid := range am.authorizedUIDs {
-		if _, err := fmt.Fprintln(f, uid); err != nil {
-			return fmt.Errorf("failed to write authorized UID %s: %w", uid, err)
-		}
-	}
-
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("failed to sync authorized UIDs: %w", err)
-	}
-	return nil
+	return atomicWriteLines(am.authorizedFilePath(), am.authorizedUIDs)
 }
