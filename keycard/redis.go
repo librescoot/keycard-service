@@ -48,7 +48,9 @@ func (r *RedisClient) PublishAuth(uid string) error {
 		return fmt.Errorf("failed to publish auth: %w", err)
 	}
 
-	r.client.Expire(keycardHashKey, keycardExpiry)
+	if _, err := r.client.Expire(keycardHashKey, keycardExpiry); err != nil {
+		r.logger.Warn("Failed to set expiry on keycard hash", "error", err)
+	}
 
 	r.logger.Info("Published authentication", "uid", uid)
 	return nil
