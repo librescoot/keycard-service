@@ -41,11 +41,10 @@ type Service struct {
 	newUIDs            []string
 
 	// Card presence tracking
-	currentCardUID             string    // UID of currently present card ("" if none)
-	lastTappedUID              string    // UID of the last processed tap; cleared on physical departure
-	artificialDepartureExpected bool      // true when the next departure is from our own StartDiscovery restart
-	lastSeenTime               time.Time // Last time current card was detected
-	emptyPollCount             int       // Consecutive polls with no card detected
+	currentCardUID string    // UID of currently present card ("" if none)
+	lastTappedUID  string    // UID of the last processed tap; cleared on physical departure
+	lastSeenTime   time.Time // Last time current card was detected
+	emptyPollCount int       // Consecutive polls with no card detected
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -202,14 +201,12 @@ func (s *Service) handleTagEvent(event hal.TagEvent) {
 	case hal.TagArrival:
 		uid := strings.ToUpper(hex.EncodeToString(event.Tag.ID))
 		s.logger.Debug("Tag event: arrival", "uid", uid)
-		if s.handleTagDetection(uid) {
-			// Deactivate the current RF session and restart discovery so the next
-			// tap is detected. Without this the chip stays in RF_ACTIVATED state
-			// and never generates new arrival notifications.
-			s.artificialDepartureExpected = true
-			if err := s.nfc.StartDiscovery(100); err != nil {
-				s.logger.Warn("Failed to restart NFC discovery after tag arrival", "error", err)
-			}
+		s.handleTagDetection(uid)
+		// Deactivate the current RF session and restart discovery so the next
+		// tap is detected. Without this the chip stays in RF_ACTIVATED state
+		// and never generates new arrival notifications.
+		if err := s.nfc.StartDiscovery(100); err != nil {
+			s.logger.Warn("Failed to restart NFC discovery after tag arrival", "error", err)
 		}
 
 	case hal.TagDeparture:
@@ -219,10 +216,10 @@ func (s *Service) handleTagEvent(event hal.TagEvent) {
 }
 
 
-func (s *Service) handleTagDetection(uid string) bool {
+func (s *Service) handleTagDetection(uid string) {
 	if s.lastTappedUID == uid {
 		s.logger.Debug("Tag debounced - awaiting physical departure", "uid", uid)
-		return false
+		return
 	}
 	s.logger.Debug("handleTagDetection", "detected_uid", uid, "current_uid", s.currentCardUID)
 	if s.currentCardUID != uid {
@@ -232,12 +229,11 @@ func (s *Service) handleTagDetection(uid string) bool {
 		s.lastSeenTime = time.Now()
 		s.emptyPollCount = 0
 		s.handleTagArrival(uid)
-		return true
+	} else {
+		s.lastSeenTime = time.Now()
+		s.emptyPollCount = 0
+		s.logger.Debug("Tag still present", "uid", uid)
 	}
-	s.lastSeenTime = time.Now()
-	s.emptyPollCount = 0
-	s.logger.Debug("Tag still present", "uid", uid)
-	return false
 }
 
 func (s *Service) handleTagDeparture() {
@@ -246,13 +242,10 @@ func (s *Service) handleTagDeparture() {
 		s.currentCardUID = ""
 		s.emptyPollCount = 0
 	}
-	if s.artificialDepartureExpected {
-		s.artificialDepartureExpected = false
-		s.logger.Debug("Restart-triggered departure, debounce maintained", "lastTappedUID", s.lastTappedUID)
-	} else {
-		s.logger.Debug("Physical departure, debounce cleared", "lastTappedUID", s.lastTappedUID)
-		s.lastTappedUID = ""
-	}
+	// StartDiscovery consumes RF_DEACTIVATE_NTF internally, so all departures
+	// reaching here are physical - clear debounce so the next tap is allowed.
+	s.logger.Debug("Physical departure, debounce cleared", "lastTappedUID", s.lastTappedUID)
+	s.lastTappedUID = ""
 }
 
 func (s *Service) handleTagArrival(uid string) {
