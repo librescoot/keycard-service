@@ -23,14 +23,14 @@ const (
 	lp5662RegPWMConfig   = 0x70
 
 	// Configuration values
-	lp5662EnableChip       = 0x40
+	lp5662EnableChip       = 0xC0 // bit6=CHIP_EN, bit7=OUTPUT_EN
 	lp5662ResetValue       = 0xFF
 	lp5662PWMDirectControl = 0x3F
 	lp5662PWMOverI2C       = 0x00
-	lp5662InternalClock    = 0x01
+	lp5662InternalClock    = 0x61 // bit0=internal clock, bit5+6=PWM clock enable
 
-	// Default LED current (mA setting)
-	lp5662DefaultCurrent = 0x14 // ~10mA per channel
+	// Default LED current
+	lp5662DefaultCurrent = 0xAF // ~175 matching reference implementation
 )
 
 // RGB color values

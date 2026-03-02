@@ -201,6 +201,12 @@ func (s *Service) handleTagEvent(event hal.TagEvent) {
 		uid := strings.ToUpper(hex.EncodeToString(event.Tag.ID))
 		s.logger.Debug("Tag event: arrival", "uid", uid)
 		s.handleTagDetection(uid)
+		// Deactivate the current RF session and restart discovery so the next
+		// tap is detected. Without this the chip stays in RF_ACTIVATED state
+		// and never generates new arrival notifications.
+		if err := s.nfc.StartDiscovery(100); err != nil {
+			s.logger.Warn("Failed to restart NFC discovery after tag arrival", "error", err)
+		}
 
 	case hal.TagDeparture:
 		s.logger.Debug("Tag event: departure")
