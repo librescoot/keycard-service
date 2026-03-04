@@ -128,45 +128,93 @@ func (s *Service) Run() error {
 		s.enterMasterLearningMode()
 	}
 
-	// Enable event-driven detection
-	s.nfc.SetTagEventReaderEnabled(true)
-	defer s.nfc.SetTagEventReaderEnabled(false)
+	const (
+		pollPeriod    = 200 // ms — NFC chip discovery poll period
+		pollTimeout   = 5 * time.Second
+		departureWait = 100 * time.Millisecond
+	)
 
-	// Start continuous discovery with short period
-	if err := s.nfc.StartDiscovery(100); err != nil {
-		if strings.Contains(err.Error(), "status: 06") {
-			s.logger.Warn("Discovery failed with semantic error, reinitializing")
-			if err := s.nfc.FullReinitialize(); err != nil {
-				return fmt.Errorf("reinitialization failed: %w", err)
+	startDiscovery := func() error {
+		if err := s.nfc.StartDiscovery(pollPeriod); err != nil {
+			if strings.Contains(err.Error(), "status: 06") {
+				s.logger.Warn("Discovery failed with semantic error, reinitializing")
+				if err := s.nfc.FullReinitialize(); err != nil {
+					return fmt.Errorf("reinitialization failed: %w", err)
+				}
+				if err := s.nfc.StartDiscovery(pollPeriod); err != nil {
+					return fmt.Errorf("discovery failed after reinit: %w", err)
+				}
+			} else {
+				return fmt.Errorf("failed to start discovery: %w", err)
 			}
-			if err := s.nfc.StartDiscovery(100); err != nil {
-				return fmt.Errorf("discovery failed after reinit: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to start discovery: %w", err)
 		}
+		return nil
+	}
+
+	if err := startDiscovery(); err != nil {
+		return err
 	}
 	defer s.nfc.StopDiscovery()
 
-	s.logger.Info("Event-driven tag detection enabled")
+	s.logger.Info("NFC polling active")
 
-	// Event loop
-	eventChan := s.nfc.GetTagEventChannel()
 	for {
 		select {
 		case <-s.ctx.Done():
 			s.logger.Info("Service shutting down")
 			return nil
-		case event, ok := <-eventChan:
-			if !ok {
-				s.logger.Error("Event channel closed unexpectedly")
-				return fmt.Errorf("event channel closed")
+		default:
+		}
+
+		// Wait for NFC chip to report data
+		if err := s.nfc.AwaitReadable(pollTimeout); err != nil {
+			// Timeout — restart discovery as periodic safety reset
+			if err := startDiscovery(); err != nil {
+				return err
 			}
-			if event.Error != nil {
-				s.logger.Warn("Tag event error", "error", event.Error)
-				continue
+			continue
+		}
+
+		// Read the NCI notification
+		tags, err := s.nfc.DetectTags()
+		if err != nil {
+			s.logger.Debug("DetectTags error", "error", err)
+			if err := startDiscovery(); err != nil {
+				return err
 			}
-			s.handleTagEvent(event)
+			continue
+		}
+		if len(tags) == 0 {
+			continue
+		}
+
+		// Tag detected
+		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
+		s.logger.Info("Tag arrived", "uid", uid)
+		s.currentCardUID = uid
+		s.handleTagArrival(uid)
+
+		// Wait for tag to depart using SLEEP→SELECT cycle
+		departed := false
+		for !departed {
+			select {
+			case <-s.ctx.Done():
+				s.currentCardUID = ""
+				return nil
+			default:
+			}
+			time.Sleep(departureWait)
+			if err := s.nfc.SelectTag(0); err != nil {
+				departed = true
+			}
+		}
+
+		s.logger.Info("Tag departed", "uid", s.currentCardUID)
+		s.currentCardUID = ""
+
+		// Restart discovery for next card
+		if err := startDiscovery(); err != nil {
+			return err
 		}
 	}
 }
@@ -189,32 +237,6 @@ func (s *Service) flashLED(setColor func() error, duration time.Duration) {
 	time.AfterFunc(duration, func() {
 		s.rgbLed.Off()
 	})
-}
-
-func (s *Service) handleTagEvent(event hal.TagEvent) {
-	switch event.Type {
-	case hal.TagArrival:
-		uid := strings.ToUpper(hex.EncodeToString(event.Tag.ID))
-		s.logger.Debug("Tag event: arrival", "uid", uid)
-		if s.currentCardUID != uid {
-			s.logger.Info("Tag arrived", "uid", uid)
-			s.currentCardUID = uid
-			s.handleTagArrival(uid)
-		} else {
-			s.logger.Debug("Tag still present", "uid", uid)
-		}
-
-	case hal.TagDeparture:
-		if s.currentCardUID != "" {
-			s.logger.Info("Tag departed", "uid", s.currentCardUID)
-			s.currentCardUID = ""
-		}
-		// Restart discovery after the card has physically left. Restarting on
-		// arrival causes artificial departure events while the card is still present.
-		if err := s.nfc.StartDiscovery(100); err != nil {
-			s.logger.Warn("Failed to restart NFC discovery after tag departure", "error", err)
-		}
-	}
 }
 
 func (s *Service) handleTagArrival(uid string) {
