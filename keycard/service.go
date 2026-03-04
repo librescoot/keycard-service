@@ -161,14 +161,17 @@ func (s *Service) Run() error {
 	for {
 		select {
 		case <-s.ctx.Done():
-			s.logger.Info("Service shutting down")
 			return nil
 		default:
 		}
 
 		// Wait for NFC chip to report data
 		if err := s.nfc.AwaitReadable(pollTimeout); err != nil {
-			// Timeout — restart discovery as periodic safety reset
+			select {
+			case <-s.ctx.Done():
+				return nil
+			default:
+			}
 			if err := startDiscovery(); err != nil {
 				return err
 			}
@@ -179,6 +182,11 @@ func (s *Service) Run() error {
 		tags, err := s.nfc.DetectTags()
 		if err != nil {
 			s.logger.Debug("DetectTags error", "error", err)
+			select {
+			case <-s.ctx.Done():
+				return nil
+			default:
+			}
 			if err := startDiscovery(); err != nil {
 				return err
 			}
@@ -212,7 +220,11 @@ func (s *Service) Run() error {
 		s.logger.Info("Tag departed", "uid", s.currentCardUID)
 		s.currentCardUID = ""
 
-		// Restart discovery for next card
+		select {
+		case <-s.ctx.Done():
+			return nil
+		default:
+		}
 		if err := startDiscovery(); err != nil {
 			return err
 		}
