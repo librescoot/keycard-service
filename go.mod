@@ -3,7 +3,7 @@ module keycard-service
 go 1.24.0
 
 require (
-	github.com/librescoot/pn7150 v0.1.6
+	github.com/librescoot/pn7150 v0.1.7-0.20260306200419-da17f13e4919
 	github.com/librescoot/redis-ipc v0.10.3
 	golang.org/x/sys v0.41.0
 )
