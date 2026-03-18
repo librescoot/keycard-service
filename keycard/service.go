@@ -316,6 +316,7 @@ func (s *Service) exitLearnMode() {
 	s.learnMode = false
 	s.linearLed.LedLinearOff(Led3)
 	s.linearLed.LedLinearOff(Led7)
+	s.rgbLed.Off()
 	s.newUIDs = nil
 }
 
@@ -323,13 +324,19 @@ func (s *Service) learnUID(uid string) {
 	added, err := s.auth.AddAuthorized(uid)
 	if err != nil {
 		s.logger.Error("Failed to add authorized UID", "uid", uid, "error", err)
-		s.flashLED(s.rgbLed.Red, flashDuration)
+		s.rgbLed.Red()
+		time.AfterFunc(flashDuration, func() {
+			s.rgbLed.Amber()
+		})
 		return
 	}
 
 	if added {
 		s.newUIDs = append(s.newUIDs, uid)
-		s.rgbLed.Flash(flashDuration)
+		s.rgbLed.Green()
+		time.AfterFunc(flashDuration, func() {
+			s.rgbLed.Amber()
+		})
 		s.logger.Info("UID authorized", "uid", uid)
 	} else {
 		s.logger.Info("UID already authorized", "uid", uid)
