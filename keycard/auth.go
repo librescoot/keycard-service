@@ -191,6 +191,14 @@ func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
 	return true, am.saveAuthorizedUIDs()
 }
 
+func (am *AuthManager) ReplaceAuthorized(uids []string) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	am.authorizedUIDs = uids
+	return am.saveAuthorizedUIDs()
+}
+
 func (am *AuthManager) GetAuthorizedCount() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()

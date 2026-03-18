@@ -309,38 +309,47 @@ func (s *Service) enterLearnMode() {
 }
 
 func (s *Service) exitLearnMode() {
-	s.logger.Info("Exiting learn mode",
-		"newUIDs", len(s.newUIDs),
-		"totalAuthorized", s.auth.GetAuthorizedCount())
+	if len(s.newUIDs) > 0 {
+		// Replace all authorized cards with the ones learned this session
+		if err := s.auth.ReplaceAuthorized(s.newUIDs); err != nil {
+			s.logger.Error("Failed to save authorized UIDs", "error", err)
+			s.flashLED(s.rgbLed.Red, flashDuration)
+		} else {
+			s.logger.Info("Authorized cards replaced",
+				"newCards", len(s.newUIDs))
+			s.rgbLed.Flash(flashDuration)
+		}
+	} else {
+		s.logger.Info("No new cards learned, keeping existing cards",
+			"totalAuthorized", s.auth.GetAuthorizedCount())
+	}
 
 	s.learnMode = false
 	s.linearLed.LedLinearOff(Led3)
 	s.linearLed.LedLinearOff(Led7)
-	s.rgbLed.Off()
 	s.newUIDs = nil
 }
 
 func (s *Service) learnUID(uid string) {
-	added, err := s.auth.AddAuthorized(uid)
-	if err != nil {
-		s.logger.Error("Failed to add authorized UID", "uid", uid, "error", err)
-		s.rgbLed.Red()
-		time.AfterFunc(flashDuration, func() {
-			s.rgbLed.Amber()
-		})
+	// Skip master cards
+	if s.auth.IsMaster(uid) {
 		return
 	}
 
-	if added {
-		s.newUIDs = append(s.newUIDs, uid)
-		s.rgbLed.Green()
-		time.AfterFunc(flashDuration, func() {
-			s.rgbLed.Amber()
-		})
-		s.logger.Info("UID authorized", "uid", uid)
-	} else {
-		s.logger.Info("UID already authorized", "uid", uid)
+	// Deduplicate within current session
+	for _, existing := range s.newUIDs {
+		if existing == uid {
+			s.logger.Info("UID already presented this session", "uid", uid)
+			return
+		}
 	}
+
+	s.newUIDs = append(s.newUIDs, uid)
+	s.rgbLed.Green()
+	time.AfterFunc(flashDuration, func() {
+		s.rgbLed.Amber()
+	})
+	s.logger.Info("UID learned", "uid", uid)
 }
 
 func (s *Service) grantAccess(uid string) {
