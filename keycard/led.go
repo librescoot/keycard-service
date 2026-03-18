@@ -20,7 +20,7 @@ const (
 	Led7 = 7
 )
 
-// RGBLed interface for RGB LED control (can be LP5662 or script-based)
+// RGBLed interface for LED control (LP5662 or script-based fallback)
 type RGBLed interface {
 	On() error
 	Off() error

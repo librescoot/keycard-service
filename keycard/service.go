@@ -32,7 +32,7 @@ type Service struct {
 
 	nfc       *hal.PN7150
 	auth      *AuthManager
-	rgbLed    RGBLed         // RGB LED for feedback (LP5662 or script-based)
+	rgbLed    RGBLed         // RAG LED for feedback (LP5662 or script-based)
 	linearLed *LEDController // Linear LEDs for learn mode indicators
 	redis     *RedisClient
 
@@ -69,7 +69,7 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 	s.linearLed = NewLEDController(logger)
 
 	if config.LEDDevice != "" {
-		// Use LP5662 RGB LED driver
+		// Use LP5662 LED driver
 		lp5662, err := NewLP5662(config.LEDDevice, config.LEDAddress, logger)
 		if err != nil {
 			logger.Warn("Failed to initialize LP5662, falling back to script-based LED", "error", err)

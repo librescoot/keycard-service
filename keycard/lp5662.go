@@ -33,28 +33,26 @@ const (
 	lp5662DefaultCurrent = 0xAF // ~175 matching reference implementation
 )
 
-// RGB color values
-type RGB struct {
-	R, G, B uint8
+// LEDColor represents PWM values for the LP5662 tri-color (RAG) LED.
+// Channels: Amber (PWM0), Green (PWM1), Red (PWM2).
+type LEDColor struct {
+	Amber, Green, Red uint8
 }
 
 var (
-	ColorOff    = RGB{0, 0, 0}
-	ColorRed    = RGB{255, 0, 0}
-	ColorGreen  = RGB{0, 255, 0}
-	ColorBlue   = RGB{0, 0, 255}
-	ColorYellow = RGB{255, 255, 0}
-	ColorAmber  = RGB{255, 191, 0} // Orange/amber color
-	ColorWhite  = RGB{255, 255, 255}
+	ColorOff   = LEDColor{0, 0, 0}
+	ColorRed   = LEDColor{0, 0, 255}
+	ColorGreen = LEDColor{0, 255, 0}
+	ColorAmber = LEDColor{255, 0, 0}
 )
 
-// LP5662 controls the LP5662 RGB LED driver via I2C
+// LP5662 controls the LP5662 tri-color (RAG) LED driver via I2C
 type LP5662 struct {
 	mu        sync.Mutex
 	fd        int
 	logger    *slog.Logger
 	address   uint8
-	color     RGB // current color for On()
+	color     LEDColor // current color for On()
 	blinkStop chan struct{}
 	blinking  bool
 }
@@ -162,23 +160,22 @@ func (l *LP5662) init() error {
 	return nil
 }
 
-func (l *LP5662) setColorLocked(color RGB) error {
-	// LP5662 PWM register order: Yellow(unused), Green, Red
-	// We map: R->Red, G->Green, B->Yellow channel (or adjust as needed)
-	if err := l.writeReg(lp5662RegPWMBase, color.B); err != nil { // Yellow/Blue channel
+func (l *LP5662) setColorLocked(color LEDColor) error {
+	// LP5662 PWM register order: Amber (PWM0), Green (PWM1), Red (PWM2)
+	if err := l.writeReg(lp5662RegPWMBase, color.Amber); err != nil {
 		return err
 	}
-	if err := l.writeReg(lp5662RegPWMBase+1, color.G); err != nil { // Green channel
+	if err := l.writeReg(lp5662RegPWMBase+1, color.Green); err != nil {
 		return err
 	}
-	if err := l.writeReg(lp5662RegPWMBase+2, color.R); err != nil { // Red channel
+	if err := l.writeReg(lp5662RegPWMBase+2, color.Red); err != nil {
 		return err
 	}
 	return nil
 }
 
-// SetColor sets the RGB LED color
-func (l *LP5662) SetColor(color RGB) error {
+// SetColor sets the LED color
+func (l *LP5662) SetColor(color LEDColor) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.setColorLocked(color)
@@ -199,19 +196,9 @@ func (l *LP5662) Green() error {
 	return l.SetColor(ColorGreen)
 }
 
-// Blue sets the LED to blue
-func (l *LP5662) Blue() error {
-	return l.SetColor(ColorBlue)
-}
-
-// Amber sets the LED to amber/orange
+// Amber sets the LED to amber
 func (l *LP5662) Amber() error {
 	return l.SetColor(ColorAmber)
-}
-
-// Yellow sets the LED to yellow
-func (l *LP5662) Yellow() error {
-	return l.SetColor(ColorYellow)
 }
 
 // On turns on the LED with the configured color
