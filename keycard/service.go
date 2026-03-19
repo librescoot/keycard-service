@@ -128,6 +128,9 @@ func (s *Service) Run() error {
 		s.enterMasterLearningMode()
 	}
 
+	// Start Redis command listener in background
+	go s.WatchCommands(s.ctx)
+
 	const (
 		pollPeriod    = 200 // ms — NFC chip discovery poll period
 		pollTimeout   = 5 * time.Second
