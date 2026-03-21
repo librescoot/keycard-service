@@ -191,6 +191,36 @@ func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
 	return true, am.saveAuthorizedUIDs()
 }
 
+func (am *AuthManager) RemoveAuthorized(uid string) (bool, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	uid = strings.ToUpper(uid)
+
+	// Prevent removing the last authorized card (anti-lockout)
+	if len(am.authorizedUIDs) <= 1 {
+		return false, fmt.Errorf("cannot remove last authorized card")
+	}
+
+	for i, a := range am.authorizedUIDs {
+		if a == uid {
+			am.authorizedUIDs = append(am.authorizedUIDs[:i], am.authorizedUIDs[i+1:]...)
+			return true, am.saveAuthorizedUIDs()
+		}
+	}
+
+	return false, nil
+}
+
+func (am *AuthManager) ListAuthorized() []string {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	result := make([]string, len(am.authorizedUIDs))
+	copy(result, am.authorizedUIDs)
+	return result
+}
+
 func (am *AuthManager) ReplaceAuthorized(uids []string) error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
