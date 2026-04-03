@@ -22,6 +22,7 @@ func NewRedisClient(addr string, logger *slog.Logger) (*RedisClient, error) {
 	client, err := ipc.New(
 		ipc.WithURL(addr),
 		ipc.WithLogger(logger),
+		ipc.WithCodec(ipc.StringCodec{}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
