@@ -161,12 +161,15 @@ func (am *AuthManager) SetMaster(uid string) error {
 	uid = strings.ToUpper(uid)
 	am.masterUIDs = []string{uid}
 
-	am.authorizedUIDs = nil
-
 	if err := am.saveMasterUIDs(); err != nil {
 		return err
 	}
-	return am.saveAuthorizedUIDs()
+
+	if uid != "NONE" {
+		am.authorizedUIDs = nil
+		return am.saveAuthorizedUIDs()
+	}
+	return nil
 }
 
 func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
