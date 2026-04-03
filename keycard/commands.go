@@ -16,6 +16,9 @@ const keycardCommandList = "scooter:keycard"
 //   - "add:<uid>"         — authorize a new card
 //   - "remove:<uid>"      — revoke a card
 //   - "count"             — respond with number of authorized cards
+//   - "set-master:<uid>"  — set master UID (use NONE to disable physical master)
+//   - "learn:start"       — enter learn mode (as if master card was tapped)
+//   - "learn:stop"        — exit learn mode, saving any learned cards
 func (s *Service) WatchCommands(ctx context.Context) {
 	s.logger.Info("Starting keycard command watcher", "key", keycardCommandList)
 
@@ -71,6 +74,43 @@ func (s *Service) WatchCommands(ctx context.Context) {
 				s.publishResult("ok")
 			} else {
 				s.publishResult("error:not found")
+			}
+
+		case strings.HasPrefix(command, "set-master:"):
+			uid := strings.TrimPrefix(command, "set-master:")
+			uid = strings.TrimSpace(uid)
+			if uid == "" {
+				s.publishResult("error:empty uid")
+				return nil
+			}
+			if err := s.auth.SetMaster(strings.ToUpper(uid)); err != nil {
+				s.logger.Error("Failed to set master", "uid", uid, "error", err)
+				s.publishResult(fmt.Sprintf("error:%v", err))
+			} else {
+				s.masterLearningMode = false
+				s.rgbLed.StopBlink()
+				s.logger.Info("Master set via command", "uid", uid)
+				s.publishResult("ok")
+			}
+
+		case command == "learn:start":
+			if s.learnMode {
+				s.publishResult("error:already in learn mode")
+			} else if s.masterLearningMode {
+				s.publishResult("error:in master learning mode")
+			} else {
+				s.enterLearnMode()
+				s.logger.Info("Learn mode started via command")
+				s.publishResult("ok")
+			}
+
+		case command == "learn:stop":
+			if !s.learnMode {
+				s.publishResult("error:not in learn mode")
+			} else {
+				s.exitLearnMode()
+				s.logger.Info("Learn mode stopped via command")
+				s.publishResult("ok")
 			}
 
 		default:
