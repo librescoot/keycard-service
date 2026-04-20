@@ -357,9 +357,10 @@ func (s *Service) learnUID(uid string) {
 
 func (s *Service) grantAccess(uid string) {
 	s.logger.Info("Access granted", "uid", uid)
-	s.flashLED(s.rgbLed.Green, flashDuration)
 
 	if err := s.redis.PublishAuth(uid); err != nil {
 		s.logger.Error("Failed to publish auth to Redis", "error", err)
 	}
+
+	s.flashLED(s.rgbLed.Green, flashDuration)
 }
