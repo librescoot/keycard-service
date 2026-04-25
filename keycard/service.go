@@ -44,6 +44,7 @@ type Service struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 func NewService(config *Config, logger *slog.Logger) (*Service, error) {
@@ -55,6 +56,7 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		ctx:            ctx,
 		cancel:         cancel,
 		currentCardUID: "",
+		done:           make(chan struct{}),
 	}
 
 	var err error
@@ -119,6 +121,8 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 }
 
 func (s *Service) Run() error {
+	defer close(s.done)
+
 	s.logger.Info("Keycard service starting",
 		"device", s.config.Device,
 		"dataDir", s.config.DataDir,
@@ -236,6 +240,19 @@ func (s *Service) Run() error {
 
 func (s *Service) Stop() {
 	s.cancel()
+
+	// Wait for Run() to return before tearing down the HAL, otherwise
+	// an in-flight poll iteration can race past its ctx.Done() check
+	// and issue an I2C op against the just-Deinitialized NFC chip.
+	// Timeout safety net so a stuck Run() can't hang systemd shutdown.
+	// If Run() was never entered (e.g. main aborts before calling it),
+	// the timeout path keeps Stop() from blocking forever.
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		s.logger.Warn("Stop: timed out waiting for Run() to return, tearing down anyway")
+	}
+
 	if s.rgbLed != nil {
 		s.rgbLed.Close()
 	}
