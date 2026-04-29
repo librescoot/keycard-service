@@ -238,6 +238,20 @@ func (am *AuthManager) GetAuthorizedCount() int {
 	return len(am.authorizedUIDs)
 }
 
+// GetMasterCount returns the number of real master UIDs, excluding the
+// "NONE" sentinel that means physical master is intentionally disabled.
+func (am *AuthManager) GetMasterCount() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	n := 0
+	for _, m := range am.masterUIDs {
+		if m != "NONE" {
+			n++
+		}
+	}
+	return n
+}
+
 func (am *AuthManager) saveMasterUIDs() error {
 	return atomicWriteLines(am.masterFilePath(), am.masterUIDs)
 }
