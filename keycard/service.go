@@ -128,6 +128,8 @@ func (s *Service) Run() error {
 		"dataDir", s.config.DataDir,
 		"hasMaster", s.auth.HasMaster())
 
+	s.publishKeycardCounts()
+
 	if !s.auth.HasMaster() {
 		s.enterMasterLearningMode()
 	}
@@ -312,12 +314,19 @@ func (s *Service) learnMasterUID(uid string) {
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		return
 	}
+	s.publishKeycardCounts()
 
 	s.masterLearningMode = false
 	s.rgbLed.StopBlink()
 	s.rgbLed.Flash(flashDuration)
 
 	s.logger.Info("Master UID learned successfully", "uid", uid)
+}
+
+func (s *Service) publishKeycardCounts() {
+	if err := s.redis.PublishKeycardCounts(s.auth.GetMasterCount(), s.auth.GetAuthorizedCount()); err != nil {
+		s.logger.Warn("Failed to publish keycard counts", "error", err)
+	}
 }
 
 func (s *Service) enterLearnMode() {
@@ -337,6 +346,7 @@ func (s *Service) exitLearnMode() {
 		} else {
 			s.logger.Info("Authorized cards replaced",
 				"newCards", len(s.newUIDs))
+			s.publishKeycardCounts()
 			s.rgbLed.Flash(flashDuration)
 		}
 	} else {

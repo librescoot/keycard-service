@@ -38,6 +38,20 @@ func (r *RedisClient) Close() error {
 	return r.client.Close()
 }
 
+// PublishKeycardCounts writes pairing counts to the shared "system" hash.
+// The "keycard" hash is reserved for transient auth events with a 10s
+// expiry, so persistent ambient state lives elsewhere.
+func (r *RedisClient) PublishKeycardCounts(masterCount, authorizedCount int) error {
+	_, err := r.client.Hash("system").SetManyIfChanged(map[string]any{
+		"keycard-master-count":     masterCount,
+		"keycard-authorized-count": authorizedCount,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to publish keycard counts: %w", err)
+	}
+	return nil
+}
+
 func (r *RedisClient) PublishAuth(uid string) error {
 	err := r.client.Hash(keycardHashKey).SetManyPublishOne(map[string]any{
 		"authentication": "passed",

@@ -51,6 +51,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			}
 			if added {
 				s.logger.Info("Card authorized via command", "uid", uid)
+				s.publishKeycardCounts()
 				s.publishResult("ok")
 			} else {
 				s.publishResult("error:already authorized")
@@ -71,6 +72,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			}
 			if removed {
 				s.logger.Info("Card revoked via command", "uid", uid)
+				s.publishKeycardCounts()
 				s.publishResult("ok")
 			} else {
 				s.publishResult("error:not found")
@@ -89,6 +91,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			} else {
 				s.masterLearningMode = false
 				s.rgbLed.StopBlink()
+				s.publishKeycardCounts()
 				s.logger.Info("Master set via command", "uid", uid)
 				s.publishResult("ok")
 			}
