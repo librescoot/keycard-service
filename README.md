@@ -1,6 +1,8 @@
-# LibreScoot Keycard Service
+# Librescoot Keycard Service
 
-NFC keycard authentication service for LibreScoot vehicles using the PN7150 NFC controller.
+NFC keycard authentication service for Librescoot vehicles using the PN7150 NFC controller.
+
+Part of the [Librescoot](https://librescoot.org/) open-source platform.
 
 ## Features
 
@@ -131,8 +133,15 @@ make clean
 
 ## License
 
-This project is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC-BY-NC-4.0). See [LICENSE](LICENSE) for details.
+This project is dual-licensed. The source code is available under the
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License][cc-by-nc-sa].
+The maintainers reserve the right to grant separate licenses for commercial distribution; please contact the maintainers to discuss commercial licensing.
 
-## Part of LibreScoot
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
 
-This service is part of the [LibreScoot](https://github.com/librescoot) project, an open-source vehicle control system.
+[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
+[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
+
+## Part of Librescoot
+
+This service is part of the [Librescoot](https://github.com/librescoot) project, an open-source vehicle control system.
