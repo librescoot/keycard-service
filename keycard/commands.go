@@ -4,9 +4,21 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	ipc "github.com/librescoot/redis-ipc"
 )
+
+// listWriteSpacing is the gap between consecutive command-result writes for
+// multi-response commands like "list". Reason: command-result is a single
+// hash field; the bluetooth-service watcher does HGET on each pub/sub
+// notification, and PUBLISH only carries the field name (not the value).
+// Without spacing, back-to-back writes get coalesced — the reader's HGETs
+// all return whichever value happened to be latest, so entries are missed
+// and others are duplicated. 250 ms is comfortably above the BLE
+// extended-response throttle (100 ms) and the typical pub/sub round trip,
+// so each write has time to be observed before the next one lands.
+const listWriteSpacing = 250 * time.Millisecond
 
 const keycardCommandList = "scooter:keycard"
 
@@ -30,6 +42,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			uids := s.auth.ListAuthorized()
 			s.publishResult(fmt.Sprintf("count:%d", len(uids)))
 			for _, uid := range uids {
+				time.Sleep(listWriteSpacing)
 				s.publishResult(fmt.Sprintf("card:%s", uid))
 			}
 
@@ -130,8 +143,12 @@ func (s *Service) WatchCommands(ctx context.Context) {
 }
 
 // publishResult writes a result to the keycard hash for bluetooth-service to pick up.
+//
+// Sync(): forces HSET+PUBLISH to complete before returning. Without it the
+// default fire-and-forget goroutines would race amongst themselves for
+// multi-write sequences (see listWriteSpacing for why ordering matters).
 func (s *Service) publishResult(result string) {
-	if err := s.redis.client.Hash(keycardHashKey).Set("command-result", result); err != nil {
+	if err := s.redis.client.Hash(keycardHashKey).Set("command-result", result, ipc.Sync()); err != nil {
 		s.logger.Error("Failed to publish keycard result", "result", result, "error", err)
 	}
 }
