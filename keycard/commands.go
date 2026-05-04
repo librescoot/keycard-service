@@ -24,13 +24,22 @@ const keycardCommandList = "scooter:keycard"
 
 // WatchCommands listens for management commands on a Redis list.
 // Commands:
-//   - "list"              — respond with all authorized UIDs
-//   - "add:<uid>"         — authorize a new card
-//   - "remove:<uid>"      — revoke a card
-//   - "count"             — respond with number of authorized cards
-//   - "set-master:<uid>"  — set master UID (use NONE to disable physical master)
-//   - "learn:start"       — enter learn mode (as if master card was tapped)
-//   - "learn:stop"        — exit learn mode, saving any learned cards
+//   - "list"               — respond with all authorized UIDs
+//   - "add:<uid>"          — authorize a new card
+//   - "remove:<uid>"       — revoke a card
+//   - "count"              — respond with number of authorized cards
+//   - "set-master:<uid>"   — set master UID (use NONE to disable physical master),
+//                            wipes authorized cards when uid != NONE
+//   - "learn:start"        — enter learn mode (as if master card was tapped)
+//   - "learn:stop"         — exit learn mode, saving any learned cards
+//   - "learn:master:start" — enter master teach-in mode; next non-registered tap
+//                            is appended as an additional master (multi-master)
+//   - "learn:master:stop"  — exit master teach-in mode without committing
+//   - "reset"              — wipe master + authorized lists, cancel any active
+//                            mode, leave service idle (start-over from installer)
+//
+// Per-tap events during learn:master are published on the keycard:events
+// PUBSUB channel — see redis.go (PublishKeycardEvent).
 func (s *Service) WatchCommands(ctx context.Context) {
 	s.logger.Info("Starting keycard command watcher", "key", keycardCommandList)
 
@@ -128,6 +137,33 @@ func (s *Service) WatchCommands(ctx context.Context) {
 				s.logger.Info("Learn mode stopped via command")
 				s.publishResult("ok")
 			}
+
+		case command == "learn:master:start":
+			if s.masterTeachInMode {
+				s.publishResult("error:already in master teach-in")
+			} else if s.learnMode {
+				s.publishResult("error:in learn mode")
+			} else if s.masterLearningMode {
+				s.publishResult("error:in master learning mode")
+			} else {
+				s.enterMasterTeachIn()
+				s.logger.Info("Master teach-in started via command")
+				s.publishResult("ok")
+			}
+
+		case command == "learn:master:stop":
+			if !s.masterTeachInMode {
+				s.publishResult("error:not in master teach-in")
+			} else {
+				s.exitMasterTeachIn()
+				s.logger.Info("Master teach-in stopped via command")
+				s.publishResult("ok")
+			}
+
+		case command == "reset":
+			s.resetAll()
+			s.logger.Info("Auth state reset via command")
+			s.publishResult("ok")
 
 		default:
 			s.logger.Warn("Unknown keycard command", "command", command)

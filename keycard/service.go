@@ -37,6 +37,7 @@ type Service struct {
 	redis     *RedisClient
 
 	masterLearningMode bool
+	masterTeachInMode  bool
 	learnMode          bool
 	newUIDs            []string
 
@@ -277,6 +278,11 @@ func (s *Service) handleTagArrival(uid string) {
 	// Set LED to amber during lookup
 	s.rgbLed.Amber()
 
+	if s.masterTeachInMode {
+		s.teachInMasterUID(uid)
+		return
+	}
+
 	if s.masterLearningMode {
 		s.learnMasterUID(uid)
 		return
@@ -321,6 +327,107 @@ func (s *Service) learnMasterUID(uid string) {
 	s.rgbLed.Flash(flashDuration)
 
 	s.logger.Info("Master UID learned successfully", "uid", uid)
+}
+
+// enterMasterTeachIn enters the command-driven master teach-in mode used by
+// the installer flow. Unlike masterLearningMode (which fires automatically at
+// boot when no master exists and uses SetMaster — wiping authorized cards),
+// this mode appends a master via AddMaster and rejects taps that match an
+// already-registered UID.
+func (s *Service) enterMasterTeachIn() {
+	s.logger.Info("Entering master teach-in mode - present a fresh card to register as master")
+	s.masterTeachInMode = true
+	s.rgbLed.StartBlink(blinkInterval)
+	if err := s.redis.PublishKeycardEvent("mode-entered:master"); err != nil {
+		s.logger.Warn("Failed to publish event", "error", err)
+	}
+}
+
+func (s *Service) exitMasterTeachIn() {
+	s.masterTeachInMode = false
+	s.rgbLed.StopBlink()
+	if err := s.redis.PublishKeycardEvent("mode-exited:master"); err != nil {
+		s.logger.Warn("Failed to publish event", "error", err)
+	}
+}
+
+func (s *Service) teachInMasterUID(uid string) {
+	uid = strings.ToUpper(uid)
+
+	if s.auth.IsAuthorized(uid) {
+		s.logger.Info("Master teach-in rejected: UID already registered", "uid", uid)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		if err := s.redis.PublishKeycardEvent("rejected:already-authorized:" + uid); err != nil {
+			s.logger.Warn("Failed to publish event", "error", err)
+		}
+		return
+	}
+
+	added, err := s.auth.AddMaster(uid)
+	if err != nil {
+		s.logger.Error("Failed to add master UID", "uid", uid, "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		if err := s.redis.PublishKeycardEvent("error:save-failed:" + uid); err != nil {
+			s.logger.Warn("Failed to publish event", "error", err)
+		}
+		return
+	}
+	if !added {
+		// Race: AddMaster found the UID already present even though the
+		// IsAuthorized check above missed it. Treat as a duplicate.
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		if err := s.redis.PublishKeycardEvent("rejected:already-authorized:" + uid); err != nil {
+			s.logger.Warn("Failed to publish event", "error", err)
+		}
+		return
+	}
+
+	s.publishKeycardCounts()
+	s.masterTeachInMode = false
+	s.rgbLed.StopBlink()
+	s.rgbLed.Flash(flashDuration)
+
+	s.logger.Info("Master UID added via teach-in", "uid", uid)
+	if err := s.redis.PublishKeycardEvent("master-learned:" + uid); err != nil {
+		s.logger.Warn("Failed to publish event", "error", err)
+	}
+	if err := s.redis.PublishKeycardEvent("mode-exited:master"); err != nil {
+		s.logger.Warn("Failed to publish event", "error", err)
+	}
+}
+
+// resetAll cancels any active mode, wipes master + authorized lists, and
+// republishes counts. Does not auto-enter masterLearningMode — leaves the
+// service idle so the caller can drive the next state explicitly. On the
+// next service restart, the boot-time HasMaster() check fires auto-learn
+// as usual.
+func (s *Service) resetAll() {
+	if s.masterTeachInMode {
+		s.exitMasterTeachIn()
+	}
+	if s.masterLearningMode {
+		s.masterLearningMode = false
+		s.rgbLed.StopBlink()
+	}
+	if s.learnMode {
+		// Discard any cards collected this session.
+		s.learnMode = false
+		s.linearLed.LedLinearOff(Led3)
+		s.linearLed.LedLinearOff(Led7)
+		s.newUIDs = nil
+	}
+
+	if err := s.auth.Reset(); err != nil {
+		s.logger.Error("Failed to reset auth state", "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		return
+	}
+
+	s.publishKeycardCounts()
+	s.logger.Info("Auth state reset")
+	if err := s.redis.PublishKeycardEvent("reset"); err != nil {
+		s.logger.Warn("Failed to publish event", "error", err)
+	}
 }
 
 func (s *Service) publishKeycardCounts() {

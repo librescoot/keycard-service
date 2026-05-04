@@ -172,6 +172,46 @@ func (am *AuthManager) SetMaster(uid string) error {
 	return nil
 }
 
+// Reset wipes both the master and authorized lists under a single lock and
+// persists the empty state to disk. Used by the "reset" Redis command for
+// installer-driven start-over flows.
+func (am *AuthManager) Reset() error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	am.masterUIDs = nil
+	am.authorizedUIDs = nil
+
+	if err := am.saveMasterUIDs(); err != nil {
+		return err
+	}
+	return am.saveAuthorizedUIDs()
+}
+
+// AddMaster appends uid to the master list without touching authorized cards.
+// Returns false if uid is already a master or authorized UID.
+func (am *AuthManager) AddMaster(uid string) (bool, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	uid = strings.ToUpper(uid)
+
+	for _, m := range am.masterUIDs {
+		if m == uid {
+			return false, nil
+		}
+	}
+
+	for _, a := range am.authorizedUIDs {
+		if a == uid {
+			return false, nil
+		}
+	}
+
+	am.masterUIDs = append(am.masterUIDs, uid)
+	return true, am.saveMasterUIDs()
+}
+
 func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()

@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	keycardHashKey = "keycard"
-	keycardExpiry  = 10 * time.Second
+	keycardHashKey      = "keycard"
+	keycardExpiry       = 10 * time.Second
+	keycardEventChannel = "keycard:events"
 )
 
 type RedisClient struct {
@@ -68,5 +69,20 @@ func (r *RedisClient) PublishAuth(uid string) error {
 	}
 
 	r.logger.Info("Published authentication", "uid", uid)
+	return nil
+}
+
+// PublishKeycardEvent publishes a transient event to the keycard:events
+// PUBSUB channel. Subscribers (installer, BLE bridge, ...) get real-time
+// notifications during teach-in flows. Format: "<event>" or "<event>:<uid>".
+// Examples:
+//   - "mode-entered:master"
+//   - "mode-exited:master"
+//   - "master-learned:DEADBEEF"
+//   - "rejected:already-authorized:DEADBEEF"
+func (r *RedisClient) PublishKeycardEvent(payload string) error {
+	if _, err := r.client.Publish(keycardEventChannel, payload); err != nil {
+		return fmt.Errorf("failed to publish keycard event: %w", err)
+	}
 	return nil
 }
