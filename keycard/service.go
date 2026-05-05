@@ -22,19 +22,19 @@ type Config struct {
 	RedisAddr   string
 	Debug       bool
 	LogLevel    int
-	LEDDevice   string // I2C device for LP5662, empty for shell scripts
-	LEDAddress  uint8  // I2C address for LP5662
+	LEDDevice   string // I2C device for LP5562, empty for shell scripts
+	LEDAddress  uint8  // I2C address for LP5562
 }
 
 type Service struct {
 	config *Config
 	logger *slog.Logger
 
-	nfc       *hal.PN7150
-	auth      *AuthManager
-	rgbLed    RGBLed         // RAG LED for feedback (LP5662 or script-based)
-	linearLed *LEDController // Linear LEDs for learn mode indicators
-	redis     *RedisClient
+	nfc        *hal.PN7150
+	auth       *AuthManager
+	rgbLed     RGBLed         // RAG keycard LED for feedback (LP5562 or script-based)
+	blinkerLed *LEDController // Turn signal blinkers (Led3, Led7), used as learn-mode indicator
+	redis      *RedisClient
 
 	masterLearningMode bool
 	masterTeachInMode  bool
@@ -69,20 +69,20 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 	}
 
 	// Initialize LED controllers
-	s.linearLed = NewLEDController(logger)
+	s.blinkerLed = NewLEDController(logger)
 
 	if config.LEDDevice != "" {
-		// Use LP5662 LED driver
-		lp5662, err := NewLP5662(config.LEDDevice, config.LEDAddress, logger)
+		// Use LP5562 LED driver
+		lp5562, err := NewLP5562(config.LEDDevice, config.LEDAddress, logger)
 		if err != nil {
-			logger.Warn("Failed to initialize LP5662, falling back to script-based LED", "error", err)
-			s.rgbLed = s.linearLed
+			logger.Warn("Failed to initialize LP5562, falling back to script-based LED", "error", err)
+			s.rgbLed = s.blinkerLed
 		} else {
-			s.rgbLed = lp5662
+			s.rgbLed = lp5562
 		}
 	} else {
 		// Use script-based LED control
-		s.rgbLed = s.linearLed
+		s.rgbLed = s.blinkerLed
 	}
 
 	s.redis, err = NewRedisClient(config.RedisAddr, logger)
@@ -412,8 +412,8 @@ func (s *Service) resetAll() {
 	if s.learnMode {
 		// Discard any cards collected this session.
 		s.learnMode = false
-		s.linearLed.LedLinearOff(Led3)
-		s.linearLed.LedLinearOff(Led7)
+		s.blinkerLed.LedLinearOff(Led3)
+		s.blinkerLed.LedLinearOff(Led7)
 		s.newUIDs = nil
 	}
 
@@ -440,8 +440,8 @@ func (s *Service) enterLearnMode() {
 	s.logger.Info("Entering learn mode - present cards to authorize")
 	s.learnMode = true
 	s.newUIDs = nil
-	s.linearLed.LedLinearOn(Led3)
-	s.linearLed.LedLinearOn(Led7)
+	s.blinkerLed.LedLinearOn(Led3)
+	s.blinkerLed.LedLinearOn(Led7)
 }
 
 func (s *Service) exitLearnMode() {
@@ -462,8 +462,8 @@ func (s *Service) exitLearnMode() {
 	}
 
 	s.learnMode = false
-	s.linearLed.LedLinearOff(Led3)
-	s.linearLed.LedLinearOff(Led7)
+	s.blinkerLed.LedLinearOff(Led3)
+	s.blinkerLed.LedLinearOff(Led7)
 	s.newUIDs = nil
 }
 

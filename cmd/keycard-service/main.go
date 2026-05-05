@@ -29,8 +29,8 @@ func main() {
 	flag.StringVar(&redisAddr, "redis", "localhost:6379", "Redis server address")
 	flag.BoolVar(&debug, "debug", false, "Enable debug logging")
 	flag.IntVar(&logLevel, "log", 2, "Log level (0=error, 1=warn, 2=info, 3=debug)")
-	flag.StringVar(&ledDevice, "led-device", "", "I2C device for LP5662 LED (empty for shell scripts)")
-	flag.UintVar(&ledAddress, "led-address", 0x30, "I2C address for LP5662 LED")
+	flag.StringVar(&ledDevice, "led-device", "", "I2C device for LP5562 LED (empty for shell scripts)")
+	flag.UintVar(&ledAddress, "led-address", 0x30, "I2C address for LP5562 LED")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
@@ -82,7 +82,7 @@ func main() {
 
 	ledInfo := "shell scripts"
 	if ledDevice != "" {
-		ledInfo = fmt.Sprintf("LP5662 at %s:0x%02X", ledDevice, ledAddress)
+		ledInfo = fmt.Sprintf("LP5562 at %s:0x%02X", ledDevice, ledAddress)
 	}
 	logger.Info(fmt.Sprintf("librescoot-keycard %s starting", version),
 		"device", device,

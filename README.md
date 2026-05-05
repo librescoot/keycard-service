@@ -10,13 +10,13 @@ Part of the [Librescoot](https://librescoot.org/) open-source platform.
 - **Master Card Learning**: Initial setup allows designating a master card
 - **Authorization Management**: Master card can authorize additional cards
 - **Redis Integration**: Publishes authentication events via Redis
-- **RGB LED Feedback**: Visual feedback using LP5662 LED controller or shell scripts
-- **Flexible LED Backend**: Supports both direct I2C control (LP5662) and script-based control
+- **RGB LED Feedback**: Visual feedback using LP5562 LED controller or shell scripts
+- **Flexible LED Backend**: Supports both direct I2C control (LP5562) and script-based control
 
 ## Hardware Requirements
 
 - PN7150 NFC controller on `/dev/pn5xx_i2c2`
-- Optional: LP5662 RGB LED controller on I2C bus (default: `/dev/i2c-2` at address `0x30`)
+- Optional: LP5562 RGB LED controller on I2C bus (default: `/dev/i2c-2` at address `0x30`)
 
 ## Installation
 
@@ -36,7 +36,7 @@ The binary will be created at `bin/keycard-service`.
 # Basic usage with script-based LED control
 ./keycard-service
 
-# With LP5662 RGB LED support
+# With LP5562 RGB LED support
 ./keycard-service --led-device /dev/i2c-2 --led-address 0x30
 
 # Custom configuration
@@ -53,8 +53,8 @@ The binary will be created at `bin/keycard-service`.
 - `--data-dir`: Directory for storing UID files (default: `/data/keycard`)
 - `--redis`: Redis server address (default: `localhost:6379`)
 - `--log`: Log level 0-3 (0=error, 1=warn, 2=info, 3=debug, default: 2)
-- `--led-device`: I2C device for LP5662 LED (empty for script-based control)
-- `--led-address`: I2C address for LP5662 LED (default: `0x30`)
+- `--led-device`: I2C device for LP5562 LED (empty for script-based control)
+- `--led-address`: I2C address for LP5562 LED (default: `0x30`)
 
 ## Operation
 
@@ -79,7 +79,7 @@ The binary will be created at `bin/keycard-service`.
 
 ## LED Feedback
 
-### LP5662 RGB LED (Hardware)
+### LP5562 RGB LED (Hardware)
 - **Green**: Authorized card
 - **Red**: Unauthorized card
 - **Amber**: Tag lookup in progress
