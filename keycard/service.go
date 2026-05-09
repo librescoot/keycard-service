@@ -444,20 +444,38 @@ func (s *Service) enterLearnMode() {
 	s.blinkerLed.LedLinearOn(Led7)
 }
 
+// exitLearnMode commits this session's collected UIDs to the authorized
+// list. Cards are appended (not replaced) — to remove a card or wipe the
+// list, use the remove:<uid> or reset commands. Any UID that has been
+// concurrently authorized via another writer is silently skipped.
 func (s *Service) exitLearnMode() {
 	if len(s.newUIDs) > 0 {
-		// Replace all authorized cards with the ones learned this session
-		if err := s.auth.ReplaceAuthorized(s.newUIDs); err != nil {
-			s.logger.Error("Failed to save authorized UIDs", "error", err)
+		added := 0
+		var saveErr error
+		for _, uid := range s.newUIDs {
+			ok, err := s.auth.AddAuthorized(uid)
+			if err != nil {
+				saveErr = err
+				s.logger.Error("Failed to save authorized UID", "uid", uid, "error", err)
+				break
+			}
+			if ok {
+				added++
+			}
+		}
+		switch {
+		case saveErr != nil:
 			s.flashLED(s.rgbLed.Red, flashDuration)
-		} else {
-			s.logger.Info("Authorized cards replaced",
-				"newCards", len(s.newUIDs))
+		case added > 0:
+			s.logger.Info("Authorized cards added",
+				"added", added, "session", len(s.newUIDs))
 			s.publishKeycardCounts()
 			s.rgbLed.Flash(flashDuration)
+		default:
+			s.logger.Info("No new cards added (all already authorized)")
 		}
 	} else {
-		s.logger.Info("No new cards learned, keeping existing cards",
+		s.logger.Info("No cards presented this session",
 			"totalAuthorized", s.auth.GetAuthorizedCount())
 	}
 
@@ -467,18 +485,33 @@ func (s *Service) exitLearnMode() {
 	s.newUIDs = nil
 }
 
+// learnUID is called for each non-master tap during learnMode. New UIDs are
+// queued in s.newUIDs (committed by exitLearnMode); already-authorized or
+// in-session UIDs are rejected with a red flash. Per-tap events are
+// published to keycard:events so subscribers (e.g. the installer) can
+// update live UI without waiting for the post-stop count refresh — the
+// count hash itself stays stable until exitLearnMode persists the session.
 func (s *Service) learnUID(uid string) {
-	// Skip master cards
 	if s.auth.IsMaster(uid) {
 		return
 	}
 
-	// Deduplicate within current session
-	for _, existing := range s.newUIDs {
-		if existing == uid {
-			s.logger.Info("UID already presented this session", "uid", uid)
-			return
+	duplicate := s.auth.IsAuthorized(uid)
+	if !duplicate {
+		for _, existing := range s.newUIDs {
+			if existing == uid {
+				duplicate = true
+				break
+			}
 		}
+	}
+	if duplicate {
+		s.logger.Info("UID rejected as duplicate", "uid", uid)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		if err := s.redis.PublishKeycardEvent("card-duplicate:" + uid); err != nil {
+			s.logger.Warn("Failed to publish event", "error", err)
+		}
+		return
 	}
 
 	s.newUIDs = append(s.newUIDs, uid)
@@ -487,6 +520,9 @@ func (s *Service) learnUID(uid string) {
 		s.rgbLed.Amber()
 	})
 	s.logger.Info("UID learned", "uid", uid)
+	if err := s.redis.PublishKeycardEvent("card-learned:" + uid); err != nil {
+		s.logger.Warn("Failed to publish event", "error", err)
+	}
 }
 
 func (s *Service) grantAccess(uid string) {

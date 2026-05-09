@@ -75,11 +75,20 @@ func (r *RedisClient) PublishAuth(uid string) error {
 // PublishKeycardEvent publishes a transient event to the keycard:events
 // PUBSUB channel. Subscribers (installer, BLE bridge, ...) get real-time
 // notifications during teach-in flows. Format: "<event>" or "<event>:<uid>".
-// Examples:
+//
+// Master teach-in (learn:master:start/stop):
 //   - "mode-entered:master"
 //   - "mode-exited:master"
 //   - "master-learned:DEADBEEF"
 //   - "rejected:already-authorized:DEADBEEF"
+//   - "error:save-failed:DEADBEEF"
+//
+// Regular learn mode (learn:start/stop, or master-card-tap):
+//   - "card-learned:DEADBEEF"   (queued for commit on learn:stop)
+//   - "card-duplicate:DEADBEEF" (already authorized or already in session)
+//
+// Reset:
+//   - "reset"
 func (r *RedisClient) PublishKeycardEvent(payload string) error {
 	if _, err := r.client.Publish(keycardEventChannel, payload); err != nil {
 		return fmt.Errorf("failed to publish keycard event: %w", err)
