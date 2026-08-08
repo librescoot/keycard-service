@@ -79,12 +79,16 @@ func NewLP5562(device string, address uint8, logger *slog.Logger) (*LP5562, erro
 	}
 
 	if err := led.setSlaveAddress(); err != nil {
-		unix.Close(fd)
+		if cerr := unix.Close(fd); cerr != nil && logger != nil {
+			logger.Warn("Failed to close I2C device", "device", device, "error", cerr)
+		}
 		return nil, fmt.Errorf("failed to set I2C address: %w", err)
 	}
 
 	if err := led.init(); err != nil {
-		unix.Close(fd)
+		if cerr := unix.Close(fd); cerr != nil && logger != nil {
+			logger.Warn("Failed to close I2C device", "device", device, "error", cerr)
+		}
 		return nil, fmt.Errorf("failed to initialize LP5562: %w", err)
 	}
 
@@ -206,11 +210,20 @@ func (l *LP5562) On() error {
 	return l.SetColor(l.color)
 }
 
+// logIfErr logs I2C failures from LED state changes. The scooter keeps
+// working with a dark or stuck indicator, so these are surfaced but never
+// propagated to the caller.
+func (l *LP5562) logIfErr(err error) {
+	if err != nil && l.logger != nil {
+		l.logger.Warn("LP5562 I2C write failed", "error", err)
+	}
+}
+
 // Flash turns on the LED briefly
 func (l *LP5562) Flash(duration time.Duration) {
-	l.On()
+	l.logIfErr(l.On())
 	time.AfterFunc(duration, func() {
-		l.Off()
+		l.logIfErr(l.Off())
 	})
 }
 
@@ -234,13 +247,13 @@ func (l *LP5562) StartBlink(interval time.Duration) {
 		for {
 			select {
 			case <-l.blinkStop:
-				l.Off()
+				l.logIfErr(l.Off())
 				return
 			case <-ticker.C:
 				if state {
-					l.Off()
+					l.logIfErr(l.Off())
 				} else {
-					l.On()
+					l.logIfErr(l.On())
 				}
 				state = !state
 			}
@@ -270,6 +283,7 @@ func (l *LP5562) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	l.setColorLocked(ColorOff)
+	// The I2C connection is closing right after; nothing left to retry on.
+	_ = l.setColorLocked(ColorOff)
 	return unix.Close(l.fd)
 }

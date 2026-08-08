@@ -17,21 +17,26 @@ func atomicWriteLines(path string, lines []string) error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(f, line); err != nil {
-			f.Close()
-			os.Remove(tmpPath)
+			// The write error above is what we report; a leftover temp
+			// file just gets overwritten on the next write attempt.
+			_ = os.Remove(tmpPath)
 			return err
 		}
 	}
 
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
-	f.Close()
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
 
 	return os.Rename(tmpPath, path)
 }

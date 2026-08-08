@@ -257,26 +257,36 @@ func (s *Service) Stop() {
 	}
 
 	if s.rgbLed != nil {
-		s.rgbLed.Close()
+		if err := s.rgbLed.Close(); err != nil {
+			s.logger.Warn("Failed to close LED", "error", err)
+		}
 	}
 	if s.nfc != nil {
 		s.nfc.Deinitialize()
 	}
 	if s.redis != nil {
-		s.redis.Close()
+		if err := s.redis.Close(); err != nil {
+			s.logger.Warn("Failed to close redis client", "error", err)
+		}
 	}
 }
 
 func (s *Service) flashLED(setColor func() error, duration time.Duration) {
-	setColor()
+	if err := setColor(); err != nil {
+		s.logger.Warn("Failed to set LED", "error", err)
+	}
 	time.AfterFunc(duration, func() {
-		s.rgbLed.Off()
+		if err := s.rgbLed.Off(); err != nil {
+			s.logger.Warn("Failed to set LED", "error", err)
+		}
 	})
 }
 
 func (s *Service) handleTagArrival(uid string) {
 	// Set LED to amber during lookup
-	s.rgbLed.Amber()
+	if err := s.rgbLed.Amber(); err != nil {
+		s.logger.Warn("Failed to set LED", "error", err)
+	}
 
 	if s.masterTeachInMode {
 		s.teachInMasterUID(uid)
@@ -515,9 +525,13 @@ func (s *Service) learnUID(uid string) {
 	}
 
 	s.newUIDs = append(s.newUIDs, uid)
-	s.rgbLed.Green()
+	if err := s.rgbLed.Green(); err != nil {
+		s.logger.Warn("Failed to set LED", "error", err)
+	}
 	time.AfterFunc(flashDuration, func() {
-		s.rgbLed.Amber()
+		if err := s.rgbLed.Amber(); err != nil {
+			s.logger.Warn("Failed to set LED", "error", err)
+		}
 	})
 	s.logger.Info("UID learned", "uid", uid)
 	if err := s.redis.PublishKeycardEvent("card-learned:" + uid); err != nil {

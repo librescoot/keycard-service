@@ -114,16 +114,24 @@ func TestAuthManager_SetMasterClearsAuthorized(t *testing.T) {
 	}
 
 	// Set master and add authorized
-	am.SetMaster("MASTER01")
-	am.AddAuthorized("USER0001")
-	am.AddAuthorized("USER0002")
+	if err := am.SetMaster("MASTER01"); err != nil {
+		t.Fatalf("SetMaster failed: %v", err)
+	}
+	if _, err := am.AddAuthorized("USER0001"); err != nil {
+		t.Fatalf("AddAuthorized failed: %v", err)
+	}
+	if _, err := am.AddAuthorized("USER0002"); err != nil {
+		t.Fatalf("AddAuthorized failed: %v", err)
+	}
 
 	if am.GetAuthorizedCount() != 2 {
 		t.Errorf("expected 2 authorized UIDs, got %d", am.GetAuthorizedCount())
 	}
 
 	// Setting new master should clear authorized
-	am.SetMaster("MASTER02")
+	if err := am.SetMaster("MASTER02"); err != nil {
+		t.Fatalf("SetMaster failed: %v", err)
+	}
 
 	if am.GetAuthorizedCount() != 0 {
 		t.Errorf("expected 0 authorized UIDs after new master, got %d", am.GetAuthorizedCount())
@@ -147,9 +155,15 @@ func TestAuthManager_Persistence(t *testing.T) {
 		t.Fatalf("NewAuthManager failed: %v", err)
 	}
 
-	am1.SetMaster("MASTER01")
-	am1.AddAuthorized("USER0001")
-	am1.AddAuthorized("USER0002")
+	if err := am1.SetMaster("MASTER01"); err != nil {
+		t.Fatalf("SetMaster failed: %v", err)
+	}
+	if _, err := am1.AddAuthorized("USER0001"); err != nil {
+		t.Fatalf("AddAuthorized failed: %v", err)
+	}
+	if _, err := am1.AddAuthorized("USER0002"); err != nil {
+		t.Fatalf("AddAuthorized failed: %v", err)
+	}
 
 	// Create new instance from same directory
 	am2, err := NewAuthManager(dir)
@@ -183,10 +197,14 @@ func TestAuthManager_NormalizesUIDs(t *testing.T) {
 
 	// Write file with spaces (as might come from manual editing)
 	masterFile := filepath.Join(dir, "master_uids.txt")
-	os.WriteFile(masterFile, []byte("AA BB CC DD\n"), 0644)
+	if err := os.WriteFile(masterFile, []byte("AA BB CC DD\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	authFile := filepath.Join(dir, "authorized_uids.txt")
-	os.WriteFile(authFile, []byte("11 22 33 44\n"), 0644)
+	if err := os.WriteFile(authFile, []byte("11 22 33 44\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	am, err := NewAuthManager(dir)
 	if err != nil {

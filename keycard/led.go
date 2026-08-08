@@ -58,15 +58,15 @@ func (l *LEDController) Off() error {
 }
 
 func (l *LEDController) Flash(duration time.Duration) {
-	l.On()
+	_ = l.On()
 	time.AfterFunc(duration, func() {
-		l.Off()
+		_ = l.Off()
 	})
 }
 
 func (l *LEDController) Close() error {
 	l.StopBlink()
-	l.Off()
+	_ = l.Off()
 	return nil
 }
 
@@ -89,13 +89,13 @@ func (l *LEDController) StartBlink(interval time.Duration) {
 		for {
 			select {
 			case <-l.blinkStop:
-				l.Off()
+				_ = l.Off()
 				return
 			case <-ticker.C:
 				if state {
-					l.Off()
+					_ = l.Off()
 				} else {
-					l.On()
+					_ = l.On()
 				}
 				state = !state
 			}
