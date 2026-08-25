@@ -116,15 +116,12 @@ func (l *LP5562) writeReg(reg, value uint8) error {
 	return nil
 }
 
-func (l *LP5562) init() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Reset the chip
-	if err := l.writeReg(lp5562RegReset, lp5562ResetValue); err != nil {
-		return fmt.Errorf("reset failed: %w", err)
-	}
-
+// applyConfigLocked writes the operating-mode, clock, enable and drive-current
+// registers. vehicle-service drives the same chip for the blinker indicator
+// (I2C_SLAVE_FORCE on the same bus and address) and leaves it on a lower drive
+// current with logarithmic dimming disabled, so re-assert our own settings
+// before every colour change rather than trusting the state we set at init.
+func (l *LP5562) applyConfigLocked() error {
 	// Set PWM to direct control mode
 	if err := l.writeReg(lp5562RegMiscConfig, lp5562PWMDirectControl); err != nil {
 		return fmt.Errorf("misc config failed: %w", err)
@@ -150,6 +147,22 @@ func (l *LP5562) init() error {
 		if err := l.writeReg(lp5562RegCurrentBase+i, lp5562DefaultCurrent); err != nil {
 			return fmt.Errorf("current config failed: %w", err)
 		}
+	}
+
+	return nil
+}
+
+func (l *LP5562) init() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Reset the chip
+	if err := l.writeReg(lp5562RegReset, lp5562ResetValue); err != nil {
+		return fmt.Errorf("reset failed: %w", err)
+	}
+
+	if err := l.applyConfigLocked(); err != nil {
+		return err
 	}
 
 	// Turn off all LEDs initially
@@ -182,6 +195,9 @@ func (l *LP5562) setColorLocked(color LEDColor) error {
 func (l *LP5562) SetColor(color LEDColor) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if err := l.applyConfigLocked(); err != nil {
+		return err
+	}
 	return l.setColorLocked(color)
 }
 

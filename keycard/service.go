@@ -425,6 +425,9 @@ func (s *Service) resetAll() {
 		s.blinkerLed.LedLinearOff(Led3)
 		s.blinkerLed.LedLinearOff(Led7)
 		s.newUIDs = nil
+		if err := s.rgbLed.Off(); err != nil {
+			s.logger.Warn("Failed to set LED", "error", err)
+		}
 	}
 
 	if err := s.auth.Reset(); err != nil {
@@ -459,6 +462,14 @@ func (s *Service) enterLearnMode() {
 // list, use the remove:<uid> or reset commands. Any UID that has been
 // concurrently authorized via another writer is silently skipped.
 func (s *Service) exitLearnMode() {
+	// handleTagArrival leaves the LED amber for the whole learn session, so
+	// clear it here before any branch decides whether to flash. Without this
+	// the sessions that neither flash nor error out (nothing presented, or
+	// only already-authorized cards) leave the LED lit indefinitely.
+	if err := s.rgbLed.Off(); err != nil {
+		s.logger.Warn("Failed to set LED", "error", err)
+	}
+
 	if len(s.newUIDs) > 0 {
 		added := 0
 		var saveErr error
