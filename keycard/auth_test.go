@@ -14,12 +14,10 @@ func TestAuthManager_MasterUID(t *testing.T) {
 		t.Fatalf("NewAuthManager failed: %v", err)
 	}
 
-	// Initially no master
 	if am.HasMaster() {
 		t.Error("expected no master initially")
 	}
 
-	// Set master
 	if err := am.SetMaster("AABBCCDD"); err != nil {
 		t.Fatalf("SetMaster failed: %v", err)
 	}
@@ -49,12 +47,10 @@ func TestAuthManager_AuthorizedUIDs(t *testing.T) {
 		t.Fatalf("NewAuthManager failed: %v", err)
 	}
 
-	// Set master first
 	if err := am.SetMaster("MASTER01"); err != nil {
 		t.Fatalf("SetMaster failed: %v", err)
 	}
 
-	// Add authorized UID
 	added, err := am.AddAuthorized("USER0001")
 	if err != nil {
 		t.Fatalf("AddAuthorized failed: %v", err)
@@ -63,7 +59,6 @@ func TestAuthManager_AuthorizedUIDs(t *testing.T) {
 		t.Error("expected AddAuthorized to return true for new UID")
 	}
 
-	// Check authorization
 	if !am.IsAuthorized("USER0001") {
 		t.Error("expected IsAuthorized to return true for authorized UID")
 	}
@@ -72,17 +67,14 @@ func TestAuthManager_AuthorizedUIDs(t *testing.T) {
 		t.Error("expected IsAuthorized to be case-insensitive")
 	}
 
-	// Master should also be authorized
 	if !am.IsAuthorized("MASTER01") {
 		t.Error("expected master to be authorized")
 	}
 
-	// Unknown UID should not be authorized
 	if am.IsAuthorized("UNKNOWN1") {
 		t.Error("expected IsAuthorized to return false for unknown UID")
 	}
 
-	// Adding same UID again should return false
 	added, err = am.AddAuthorized("USER0001")
 	if err != nil {
 		t.Fatalf("AddAuthorized failed: %v", err)
@@ -91,7 +83,6 @@ func TestAuthManager_AuthorizedUIDs(t *testing.T) {
 		t.Error("expected AddAuthorized to return false for existing UID")
 	}
 
-	// Adding master as authorized should return false
 	added, err = am.AddAuthorized("MASTER01")
 	if err != nil {
 		t.Fatalf("AddAuthorized failed: %v", err)
@@ -113,7 +104,6 @@ func TestAuthManager_SetMasterClearsAuthorized(t *testing.T) {
 		t.Fatalf("NewAuthManager failed: %v", err)
 	}
 
-	// Set master and add authorized
 	if err := am.SetMaster("MASTER01"); err != nil {
 		t.Fatalf("SetMaster failed: %v", err)
 	}
@@ -128,7 +118,6 @@ func TestAuthManager_SetMasterClearsAuthorized(t *testing.T) {
 		t.Errorf("expected 2 authorized UIDs, got %d", am.GetAuthorizedCount())
 	}
 
-	// Setting new master should clear authorized
 	if err := am.SetMaster("MASTER02"); err != nil {
 		t.Fatalf("SetMaster failed: %v", err)
 	}
@@ -149,7 +138,6 @@ func TestAuthManager_SetMasterClearsAuthorized(t *testing.T) {
 func TestAuthManager_Persistence(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create and populate
 	am1, err := NewAuthManager(dir)
 	if err != nil {
 		t.Fatalf("NewAuthManager failed: %v", err)
@@ -165,7 +153,6 @@ func TestAuthManager_Persistence(t *testing.T) {
 		t.Fatalf("AddAuthorized failed: %v", err)
 	}
 
-	// Create new instance from same directory
 	am2, err := NewAuthManager(dir)
 	if err != nil {
 		t.Fatalf("NewAuthManager (reload) failed: %v", err)
@@ -195,7 +182,6 @@ func TestAuthManager_Persistence(t *testing.T) {
 func TestAuthManager_NormalizesUIDs(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write file with spaces (as might come from manual editing)
 	masterFile := filepath.Join(dir, "master_uids.txt")
 	if err := os.WriteFile(masterFile, []byte("AA BB CC DD\n"), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -211,7 +197,6 @@ func TestAuthManager_NormalizesUIDs(t *testing.T) {
 		t.Fatalf("NewAuthManager failed: %v", err)
 	}
 
-	// Should match without spaces
 	if !am.IsMaster("AABBCCDD") {
 		t.Error("expected master to match after normalizing spaces")
 	}

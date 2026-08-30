@@ -17,13 +17,13 @@ const (
 )
 
 type Config struct {
-	Device      string
-	DataDir     string
-	RedisAddr   string
-	Debug       bool
-	LogLevel    int
-	LEDDevice   string // I2C device for LP5562, empty for shell scripts
-	LEDAddress  uint8  // I2C address for LP5562
+	Device     string
+	DataDir    string
+	RedisAddr  string
+	Debug      bool
+	LogLevel   int
+	LEDDevice  string // LP5562 I2C device; empty selects the script fallback.
+	LEDAddress uint8  // LP5562 I2C address.
 }
 
 type Service struct {
@@ -32,8 +32,8 @@ type Service struct {
 
 	nfc        *hal.PN7150
 	auth       *AuthManager
-	rgbLed     RGBLed         // RAG keycard LED for feedback (LP5562 or script-based)
-	blinkerLed *LEDController // Turn signal blinkers (Led3, Led7), used as learn-mode indicator
+	rgbLed     RGBLed         // RAG card feedback LED.
+	blinkerLed *LEDController // Turn-signal LEDs indicate learn mode.
 	redis      *RedisClient
 
 	masterLearningMode bool
@@ -41,7 +41,7 @@ type Service struct {
 	learnMode          bool
 	newUIDs            []string
 
-	currentCardUID string // UID of currently present card ("" if none)
+	currentCardUID string // Empty when no card is present.
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -68,11 +68,9 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
 
-	// Initialize LED controllers
 	s.blinkerLed = NewLEDController(logger)
 
 	if config.LEDDevice != "" {
-		// Use LP5562 LED driver
 		lp5562, err := NewLP5562(config.LEDDevice, config.LEDAddress, logger)
 		if err != nil {
 			logger.Warn("Failed to initialize LP5562, falling back to script-based LED", "error", err)
@@ -81,7 +79,6 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 			s.rgbLed = lp5562
 		}
 	} else {
-		// Use script-based LED control
 		s.rgbLed = s.blinkerLed
 	}
 
@@ -135,11 +132,10 @@ func (s *Service) Run() error {
 		s.enterMasterLearningMode()
 	}
 
-	// Start Redis command listener in background
 	go s.WatchCommands(s.ctx)
 
 	const (
-		pollPeriod    = 200 // ms — NFC chip discovery poll period
+		pollPeriod    = 200 // NFC discovery period, in milliseconds.
 		pollTimeout   = 5 * time.Second
 		departureWait = 100 * time.Millisecond
 	)
@@ -175,7 +171,6 @@ func (s *Service) Run() error {
 		default:
 		}
 
-		// Wait for NFC chip to report data
 		if err := s.nfc.AwaitReadable(pollTimeout); err != nil {
 			select {
 			case <-s.ctx.Done():
@@ -188,7 +183,6 @@ func (s *Service) Run() error {
 			continue
 		}
 
-		// Read the NCI notification
 		tags, err := s.nfc.DetectTags()
 		if err != nil {
 			s.logger.Debug("DetectTags error", "error", err)
@@ -206,7 +200,6 @@ func (s *Service) Run() error {
 			continue
 		}
 
-		// Tag detected
 		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
 		s.logger.Info("Tag arrived", "uid", uid)
 		s.currentCardUID = uid
@@ -283,7 +276,6 @@ func (s *Service) flashLED(setColor func() error, duration time.Duration) {
 }
 
 func (s *Service) handleTagArrival(uid string) {
-	// Set LED to amber during lookup
 	if err := s.rgbLed.Amber(); err != nil {
 		s.logger.Warn("Failed to set LED", "error", err)
 	}
@@ -420,7 +412,6 @@ func (s *Service) resetAll() {
 		s.rgbLed.StopBlink()
 	}
 	if s.learnMode {
-		// Discard any cards collected this session.
 		s.learnMode = false
 		s.blinkerLed.LedLinearOff(Led3)
 		s.blinkerLed.LedLinearOff(Led7)

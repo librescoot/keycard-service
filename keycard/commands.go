@@ -22,24 +22,23 @@ const listWriteSpacing = 250 * time.Millisecond
 
 const keycardCommandList = "scooter:keycard"
 
-// WatchCommands listens for management commands on a Redis list.
 // Commands:
 //   - "list"               — respond with all authorized UIDs
 //   - "add:<uid>"          — authorize a new card
 //   - "remove:<uid>"       — revoke a card
 //   - "count"              — respond with number of authorized cards
 //   - "set-master:<uid>"   — set master UID (use NONE to disable physical master),
-//                            wipes authorized cards when uid != NONE
+//     wipes authorized cards when uid != NONE
 //   - "learn:start"        — enter learn mode (as if master card was tapped);
-//                            session taps are APPENDED on learn:stop (additive),
-//                            and per-tap events (card-learned, card-duplicate)
-//                            are published on keycard:events
+//     session taps are APPENDED on learn:stop (additive),
+//     and per-tap events (card-learned, card-duplicate)
+//     are published on keycard:events
 //   - "learn:stop"         — exit learn mode, persist session cards (additive)
 //   - "learn:master:start" — enter master teach-in mode; next non-registered tap
-//                            is appended as an additional master (multi-master)
+//     is appended as an additional master (multi-master)
 //   - "learn:master:stop"  — exit master teach-in mode without committing
 //   - "reset"              — wipe master + authorized lists, cancel any active
-//                            mode, leave service idle (start-over from installer)
+//     mode, leave service idle (start-over from installer)
 //
 // Per-tap events during both learn:start and learn:master flows are
 // published on the keycard:events PUBSUB channel — see redis.go
@@ -182,8 +181,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 	s.logger.Info("Stopping keycard command watcher")
 }
 
-// publishResult writes a result to the keycard hash for bluetooth-service to pick up.
-//
+// publishResult writes the response hash consumed by bluetooth-service.
 // Sync(): forces HSET+PUBLISH to complete before returning. Without it the
 // default fire-and-forget goroutines would race amongst themselves for
 // multi-write sequences (see listWriteSpacing for why ordering matters).

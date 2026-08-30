@@ -20,7 +20,7 @@ const (
 	Led7 = 7
 )
 
-// RGBLed interface for LED control (LP5562 or script-based fallback)
+// RGBLed abstracts the LP5562 and script fallback; color methods may be no-ops.
 type RGBLed interface {
 	On() error
 	Off() error
@@ -28,7 +28,6 @@ type RGBLed interface {
 	StartBlink(interval time.Duration)
 	StopBlink()
 	Close() error
-	// Color control (may be no-op for script-based)
 	Red() error
 	Green() error
 	Amber() error
@@ -133,7 +132,6 @@ func (l *LEDController) LedBlink(led int) {
 	l.Pattern(led, LedModeBlink)
 }
 
-// Color control methods (uses greenled.sh script)
 func (l *LEDController) Red() error {
 	l.execScript(greenLedScript, "red")
 	return nil

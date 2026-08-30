@@ -1,147 +1,79 @@
 # Librescoot Keycard Service
 
-NFC keycard authentication service for Librescoot vehicles using the PN7150 NFC controller.
-
 Part of the [Librescoot](https://librescoot.org/) open-source platform.
 
-## Features
+`keycard-service` provides NFC keycard authentication for Librescoot vehicles.
+It reads tags through a PN7150 controller, stores local authorization state,
+and publishes authentication and administration events through Redis.
 
-- **NFC Tag Detection**: Reads NFC/RFID tags via PN7150 controller
-- **Master Card Learning**: Initial setup allows designating a master card
-- **Authorization Management**: Master card can authorize additional cards
-- **Redis Integration**: Publishes authentication events via Redis
-- **RGB LED Feedback**: Visual feedback using LP5562 LED controller or shell scripts
-- **Flexible LED Backend**: Supports both direct I2C control (LP5562) and script-based control
+## Capabilities
 
-## Hardware Requirements
+- Detects NFC tags through a PN7150 device.
+- Learns and manages master and authorized card UIDs.
+- Publishes successful authentication events for vehicle consumers.
+- Supports Redis command-driven card administration and learn modes.
+- Provides LED feedback through an LP5562 controller or the installed LED
+  control scripts.
 
-- PN7150 NFC controller on `/dev/pn5xx_i2c2`
-- Optional: LP5562 RGB LED controller on I2C bus (default: `/dev/i2c-2` at address `0x30`)
+## Operation and Redis interface
 
-## Installation
+On first start without a master UID, the service enters master-learning mode.
+A master-card tap enters regular learn mode; cards collected during that mode
+are saved when the master card is tapped again. Authorized-card taps publish a
+transient `keycard` hash with `authentication=passed`, `type=scooter`, and the
+UID, then set a 10-second expiration. The notification is published on the
+`keycard` channel with payload `authentication`.
 
-```bash
-# Build for ARM (Raspberry Pi, etc.)
-make build
+Master and authorized counts are published in the `system` hash as
+`keycard-master-count` and `keycard-authorized-count`.
 
-# Build for native architecture
-make build-native
-```
+Administrative commands are read from the `scooter:keycard` Redis list. They
+cover listing, counting, adding, and removing authorized UIDs; setting a
+master; regular and master teach-in; and reset. Results are written to
+`keycard.command-result`. Learn-mode events are published on `keycard:events`.
+Use the source-defined command vocabulary and result format when integrating;
+this README intentionally does not duplicate generated or protocol-level help.
 
-The binary will be created at `bin/keycard-service`.
+## Configuration and local data
 
-## Usage
+Run `bin/keycard-service -help` after building for the authoritative flag list.
+The relevant deployment settings select the PN7150 device, Redis address, UID
+data directory, logging, and optional LP5562 I2C device/address.
 
-```bash
-# Basic usage with script-based LED control
-./keycard-service
+By default, UIDs are stored under `/data/keycard` in `master_uids.txt` and
+`authorized_uids.txt`. When no LP5562 device is configured, LED feedback uses
+`/usr/bin/greenled.sh` and `/usr/bin/ledcontrol.sh`.
 
-# With LP5562 RGB LED support
-./keycard-service --led-device /dev/i2c-2 --led-address 0x30
+UID files are authorization data, and the Redis command list can change them.
+Protect both from untrusted local users and services. NFC UID matching alone is
+not a general-purpose credential-security guarantee.
 
-# Custom configuration
-./keycard-service \
-  --device /dev/pn5xx_i2c2 \
-  --data-dir /data/keycard \
-  --redis localhost:6379 \
-  --log 3
-```
-
-### Command Line Options
-
-- `--device`: NFC device path (default: `/dev/pn5xx_i2c2`)
-- `--data-dir`: Directory for storing UID files (default: `/data/keycard`)
-- `--redis`: Redis server address (default: `localhost:6379`)
-- `--log`: Log level 0-3 (0=error, 1=warn, 2=info, 3=debug, default: 2)
-- `--led-device`: I2C device for LP5562 LED (empty for script-based control)
-- `--led-address`: I2C address for LP5562 LED (default: `0x30`)
-
-## Operation
-
-### Initial Setup
-
-1. Start the service without a master card configured
-2. Service enters master learning mode (LED blinks)
-3. Present the master card to register it
-4. LED flashes to confirm registration
-
-### Normal Operation
-
-- **Authorized Card**: Green LED flash, authentication published to Redis
-- **Unauthorized Card**: Red LED flash
-- **Master Card**: Enters learning mode (LEDs 3 and 7 turn on)
-
-### Learning Mode
-
-1. Present master card to enter learning mode
-2. Present cards to authorize (LED flashes green for each)
-3. Present master card again to exit learning mode
-
-## LED Feedback
-
-### LP5562 RGB LED (Hardware)
-- **Green**: Authorized card
-- **Red**: Unauthorized card
-- **Amber**: Tag lookup in progress
-- **Blinking**: Master learning mode
-
-### Script-based LED Control
-If `--led-device` is not specified, the service calls:
-- `/usr/bin/greenled.sh` for RGB control
-- `/usr/bin/ledcontrol.sh` for pattern control
-
-## Data Storage
-
-UID files are stored in the data directory (default: `/data/keycard/`):
-- `master_uids.txt`: Master card UIDs (one per line)
-- `authorized_uids.txt`: Authorized card UIDs (one per line)
-
-## Redis Events
-
-When an authorized card is presented, the service publishes to Redis:
-
-```
-HSET keycard authentication "passed"
-HSET keycard type "scooter"
-HSET keycard uid "<card-uid>"
-PUBLISH keycard "authentication"
-EXPIRE keycard 10
-```
-
-The hash expires after 10 seconds.
-
-## Development
-
-### Dependencies
-
-- Go 1.24.1 or later
-- [github.com/librescoot/pn7150](https://github.com/librescoot/pn7150) - PN7150 NFC library
-- [github.com/redis/go-redis/v9](https://github.com/redis/go-redis) - Redis client
-
-### Building
+## Build and test
 
 ```bash
-# ARM build (for embedded Linux)
-make build
-
-# Native build (for development)
-make build-native
-
-# Clean build artifacts
-make clean
+make build        # Linux ARMv7 binary: bin/keycard-service
+make build-host   # local-development binary: bin/keycard-service
+make test
+make lint         # requires golangci-lint
 ```
+
+`make run` starts the service through `go run`; it still needs its configured
+hardware and Redis dependencies.
+
+## Deployment and operations
+
+The Yocto layer ships `librescoot-keycard.service`, which requires Valkey,
+starts after the vehicle service, and enables the LP5562 backend on
+`/dev/i2c-2`. The runtime requires a reachable Redis-compatible datastore,
+access to the configured PN7150 device, and a writable data directory. LP5562
+support additionally requires access to the configured I2C device; otherwise
+the two LED scripts must be present if visual feedback is required.
+
+The service handles `SIGINT` and `SIGTERM` and closes its NFC, LED, and Redis
+resources during shutdown.
 
 ## License
 
-This project is dual-licensed. The source code is available under the
-[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License][cc-by-nc-sa].
-The maintainers reserve the right to grant separate licenses for commercial distribution; please contact the maintainers to discuss commercial licensing.
+This project is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](LICENSE).
 
-[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
-
-[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
-[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
-
-## Part of Librescoot
-
-This service is part of the [Librescoot](https://github.com/librescoot) project, an open-source vehicle control system.
+Made with ❤️ by the Librescoot community

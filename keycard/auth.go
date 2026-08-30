@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// atomicWriteLines writes lines to a file atomically using write-sync-rename pattern.
+// atomicWriteLines persists a complete UID list with write-sync-rename.
 func atomicWriteLines(path string, lines []string) error {
 	tmpPath := path + ".tmp"
 
@@ -21,8 +21,6 @@ func atomicWriteLines(path string, lines []string) error {
 
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(f, line); err != nil {
-			// The write error above is what we report; a leftover temp
-			// file just gets overwritten on the next write attempt.
 			_ = os.Remove(tmpPath)
 			return err
 		}
@@ -76,6 +74,7 @@ func (am *AuthManager) authorizedFilePath() string {
 	return filepath.Join(am.dataDir, "authorized_uids.txt")
 }
 
+// UID lists accept manual spacing and case, but retain normalized values in memory.
 func (am *AuthManager) loadMasterUIDs() error {
 	am.masterUIDs = nil
 
@@ -91,7 +90,6 @@ func (am *AuthManager) loadMasterUIDs() error {
 	for scanner.Scan() {
 		uid := strings.TrimSpace(scanner.Text())
 		if uid != "" {
-			// Normalize: remove spaces and uppercase
 			uid = strings.ToUpper(strings.ReplaceAll(uid, " ", ""))
 			am.masterUIDs = append(am.masterUIDs, uid)
 		}
@@ -114,7 +112,6 @@ func (am *AuthManager) loadAuthorizedUIDs() error {
 	for scanner.Scan() {
 		uid := strings.TrimSpace(scanner.Text())
 		if uid != "" {
-			// Normalize: remove spaces and uppercase
 			uid = strings.ToUpper(strings.ReplaceAll(uid, " ", ""))
 			am.authorizedUIDs = append(am.authorizedUIDs, uid)
 		}
@@ -177,9 +174,7 @@ func (am *AuthManager) SetMaster(uid string) error {
 	return nil
 }
 
-// Reset wipes both the master and authorized lists under a single lock and
-// persists the empty state to disk. Used by the "reset" Redis command for
-// installer-driven start-over flows.
+// Reset clears and persists both lists together for installer start-over flows.
 func (am *AuthManager) Reset() error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -193,8 +188,7 @@ func (am *AuthManager) Reset() error {
 	return am.saveAuthorizedUIDs()
 }
 
-// AddMaster appends uid to the master list without touching authorized cards.
-// Returns false if uid is already a master or authorized UID.
+// AddMaster adds a master without changing authorized cards; registered UIDs are rejected.
 func (am *AuthManager) AddMaster(uid string) (bool, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
