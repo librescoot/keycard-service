@@ -70,7 +70,13 @@ support additionally requires access to the configured I2C device; otherwise
 the two LED scripts must be present if visual feedback is required.
 
 The service handles `SIGINT` and `SIGTERM` and closes its NFC, LED, and Redis
-resources during shutdown.
+resources during shutdown. If the NFC reader is unavailable at startup or
+disconnects later, the service keeps running and retries with capped exponential
+backoff (1–30 seconds). It also attempts to blink the card-feedback LED red
+while the reader is unavailable. The failure raises fault code `1` in
+`keycard:fault`, publishes `fault` on the `keycard` channel, and records the
+transition in `events:faults`; the fault clears after discovery starts
+successfully.
 
 ## License
 

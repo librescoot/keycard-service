@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/librescoot/pn7150 v0.1.9
-	github.com/librescoot/redis-ipc v0.11.3
+	github.com/librescoot/redis-ipc v0.15.2
 	golang.org/x/sys v0.41.0
 )
 

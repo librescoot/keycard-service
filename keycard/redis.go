@@ -17,6 +17,7 @@ const (
 type RedisClient struct {
 	client *ipc.Client
 	logger *slog.Logger
+	faults *ipc.FaultReporter
 }
 
 func NewRedisClient(addr string, logger *slog.Logger) (*RedisClient, error) {
@@ -32,11 +33,20 @@ func NewRedisClient(addr string, logger *slog.Logger) (*RedisClient, error) {
 	return &RedisClient{
 		client: client,
 		logger: logger,
+		faults: client.NewFaultReporter("keycard"),
 	}, nil
 }
 
 func (r *RedisClient) Close() error {
 	return r.client.Close()
+}
+
+func (r *RedisClient) RaiseNFCUnavailableFault(description string) error {
+	return r.faults.Raise(1, description)
+}
+
+func (r *RedisClient) ClearNFCUnavailableFault() error {
+	return r.faults.Clear(1)
 }
 
 // PublishKeycardCounts writes pairing counts to the shared "system" hash.

@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-
-	hal "github.com/librescoot/pn7150"
 )
 
 const (
@@ -30,11 +28,15 @@ type Service struct {
 	config *Config
 	logger *slog.Logger
 
-	nfc        *hal.PN7150
-	auth       *AuthManager
-	rgbLed     RGBLed         // RAG card feedback LED.
-	blinkerLed *LEDController // Turn-signal LEDs indicate learn mode.
-	redis      *RedisClient
+	nfc              nfcReader
+	nfcFactory       nfcFactory
+	auth             *AuthManager
+	rgbLed           RGBLed         // RAG card feedback LED.
+	blinkerLed       *LEDController // Turn-signal LEDs indicate learn mode.
+	redis            *RedisClient
+	faults           nfcFaultReporter
+	watchCommands    func(context.Context)
+	waitForReconnect func(time.Duration) bool
 
 	masterLearningMode bool
 	masterTeachInMode  bool
@@ -42,6 +44,7 @@ type Service struct {
 	newUIDs            []string
 
 	currentCardUID string // Empty when no card is present.
+	nfcFaultActive bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -58,6 +61,7 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		cancel:         cancel,
 		currentCardUID: "",
 		done:           make(chan struct{}),
+		nfcFactory:     newPN7150NFC,
 	}
 
 	var err error
@@ -88,34 +92,15 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		return nil, fmt.Errorf("failed to create redis client: %w", err)
 	}
 
-	logCallback := func(level hal.LogLevel, message string) {
-		if int(level) > config.LogLevel {
-			return
-		}
-		switch level {
-		case hal.LogLevelError:
-			logger.Error(message)
-		case hal.LogLevelWarning:
-			logger.Warn(message)
-		case hal.LogLevelInfo:
-			logger.Info(message)
-		case hal.LogLevelDebug:
-			logger.Debug(message)
-		}
-	}
-
-	s.nfc, err = hal.NewPN7150(config.Device, logCallback, nil, true, false, config.Debug)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create NFC HAL: %w", err)
-	}
-
-	if err := s.nfc.Initialize(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to initialize NFC HAL: %w", err)
-	}
-
+	s.faults = s.redis
+	s.watchCommands = s.WatchCommands
+	s.waitForReconnect = s.waitForNFCReconnect
 	return s, nil
+}
+
+type nfcFaultReporter interface {
+	RaiseNFCUnavailableFault(description string) error
+	ClearNFCUnavailableFault() error
 }
 
 func (s *Service) Run() error {
@@ -125,59 +110,100 @@ func (s *Service) Run() error {
 		"device", s.config.Device,
 		"dataDir", s.config.DataDir,
 		"hasMaster", s.auth.HasMaster())
-
 	s.publishKeycardCounts()
-
 	if !s.auth.HasMaster() {
 		s.enterMasterLearningMode()
 	}
+	go s.watchCommands(s.ctx)
 
-	go s.WatchCommands(s.ctx)
+	backoff := time.Second
+	for {
+		if s.ctx.Err() != nil {
+			return nil
+		}
 
+		if err := s.connectNFC(); err != nil {
+			s.handleNFCFailure(err)
+			if !s.waitForReconnect(backoff) {
+				return nil
+			}
+			backoff = min(backoff*2, 30*time.Second)
+			continue
+		}
+
+		if err := s.startDiscovery(); err != nil {
+			s.disconnectNFC()
+			s.handleNFCFailure(err)
+			if !s.waitForReconnect(backoff) {
+				return nil
+			}
+			backoff = min(backoff*2, 30*time.Second)
+			continue
+		}
+
+		if err := s.faults.ClearNFCUnavailableFault(); err != nil {
+			s.logger.Warn("Failed to clear NFC unavailable fault", "error", err)
+		}
+		s.clearNFCFaultIndication()
+		backoff = time.Second
+		s.logger.Info("NFC polling active")
+
+		err := s.pollNFC()
+		s.disconnectNFC()
+		if s.ctx.Err() != nil {
+			return nil
+		}
+		s.handleNFCFailure(err)
+		if !s.waitForReconnect(backoff) {
+			return nil
+		}
+		backoff = min(backoff*2, 30*time.Second)
+	}
+}
+
+func (s *Service) connectNFC() error {
+	nfc, err := s.nfcFactory(s.config, s.logger)
+	if err != nil {
+		return fmt.Errorf("open NFC reader: %w", err)
+	}
+	if err := nfc.Initialize(); err != nil {
+		nfc.Close()
+		return fmt.Errorf("initialize NFC reader: %w", err)
+	}
+	s.nfc = nfc
+	return nil
+}
+
+func (s *Service) startDiscovery() error {
+	const pollPeriod = 200 // NFC discovery period, in milliseconds.
+
+	if err := s.nfc.StartDiscovery(pollPeriod); err != nil {
+		if !strings.Contains(err.Error(), "status: 06") {
+			return fmt.Errorf("start discovery: %w", err)
+		}
+		s.logger.Warn("Discovery failed with semantic error, reinitializing")
+		if err := s.nfc.FullReinitialize(); err != nil {
+			return fmt.Errorf("reinitialize NFC reader: %w", err)
+		}
+		if err := s.nfc.StartDiscovery(pollPeriod); err != nil {
+			return fmt.Errorf("start discovery after reinitialization: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) pollNFC() error {
 	const (
-		pollPeriod    = 200 // NFC discovery period, in milliseconds.
 		pollTimeout   = 5 * time.Second
 		departureWait = 100 * time.Millisecond
 	)
 
-	startDiscovery := func() error {
-		if err := s.nfc.StartDiscovery(pollPeriod); err != nil {
-			if strings.Contains(err.Error(), "status: 06") {
-				s.logger.Warn("Discovery failed with semantic error, reinitializing")
-				if err := s.nfc.FullReinitialize(); err != nil {
-					return fmt.Errorf("reinitialization failed: %w", err)
-				}
-				if err := s.nfc.StartDiscovery(pollPeriod); err != nil {
-					return fmt.Errorf("discovery failed after reinit: %w", err)
-				}
-			} else {
-				return fmt.Errorf("failed to start discovery: %w", err)
-			}
-		}
-		return nil
-	}
-
-	if err := startDiscovery(); err != nil {
-		return err
-	}
-	defer s.nfc.StopDiscovery()
-
-	s.logger.Info("NFC polling active")
-
-	for {
-		select {
-		case <-s.ctx.Done():
-			return nil
-		default:
-		}
-
+	for s.ctx.Err() == nil {
 		if err := s.nfc.AwaitReadable(pollTimeout); err != nil {
-			select {
-			case <-s.ctx.Done():
+			if s.ctx.Err() != nil {
 				return nil
-			default:
 			}
-			if err := startDiscovery(); err != nil {
+			if err := s.startDiscovery(); err != nil {
 				return err
 			}
 			continue
@@ -186,12 +212,7 @@ func (s *Service) Run() error {
 		tags, err := s.nfc.DetectTags()
 		if err != nil {
 			s.logger.Debug("DetectTags error", "error", err)
-			select {
-			case <-s.ctx.Done():
-				return nil
-			default:
-			}
-			if err := startDiscovery(); err != nil {
+			if err := s.startDiscovery(); err != nil {
 				return err
 			}
 			continue
@@ -205,57 +226,95 @@ func (s *Service) Run() error {
 		s.currentCardUID = uid
 		s.handleTagArrival(uid)
 
-		// Wait for tag to depart using SLEEP→SELECT cycle
-		departed := false
-		for !departed {
-			select {
-			case <-s.ctx.Done():
+		for {
+			if s.ctx.Err() != nil {
 				s.currentCardUID = ""
 				return nil
-			default:
 			}
 			time.Sleep(departureWait)
 			if err := s.nfc.SelectTag(0); err != nil {
-				departed = true
+				break
 			}
 		}
 
 		s.logger.Info("Tag departed", "uid", s.currentCardUID)
 		s.currentCardUID = ""
-
-		select {
-		case <-s.ctx.Done():
-			return nil
-		default:
-		}
-		if err := startDiscovery(); err != nil {
+		if err := s.startDiscovery(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Service) disconnectNFC() {
+	if s.nfc == nil {
+		return
+	}
+	if err := s.nfc.StopDiscovery(); err != nil {
+		s.logger.Debug("Failed to stop NFC discovery", "error", err)
+	}
+	s.nfc.Close()
+	s.nfc = nil
+	s.currentCardUID = ""
+}
+
+func (s *Service) handleNFCFailure(err error) {
+	if err == nil {
+		err = fmt.Errorf("NFC polling stopped unexpectedly")
+	}
+	s.logger.Warn("NFC reader unavailable; will retry", "error", err)
+	if raiseErr := s.faults.RaiseNFCUnavailableFault(err.Error()); raiseErr != nil {
+		s.logger.Warn("Failed to raise NFC unavailable fault", "error", raiseErr)
+	}
+	if s.nfcFaultActive {
+		return
+	}
+	s.nfcFaultActive = true
+	if err := s.rgbLed.Red(); err != nil {
+		s.logger.Warn("Failed to set NFC fault LED", "error", err)
+	}
+	s.rgbLed.StartBlink(blinkInterval)
+}
+
+func (s *Service) clearNFCFaultIndication() {
+	if !s.nfcFaultActive {
+		return
+	}
+	s.nfcFaultActive = false
+	s.rgbLed.StopBlink()
+	if s.masterLearningMode || s.masterTeachInMode {
+		if err := s.rgbLed.Amber(); err != nil {
+			s.logger.Warn("Failed to restore NFC LED", "error", err)
+		}
+		s.rgbLed.StartBlink(blinkInterval)
+	}
+}
+
+func (s *Service) waitForNFCReconnect(delay time.Duration) bool {
+	s.logger.Info("Waiting to retry NFC reader", "delay", delay)
+	select {
+	case <-s.ctx.Done():
+		return false
+	case <-time.After(delay):
+		return true
 	}
 }
 
 func (s *Service) Stop() {
 	s.cancel()
 
-	// Wait for Run() to return before tearing down the HAL, otherwise
-	// an in-flight poll iteration can race past its ctx.Done() check
-	// and issue an I2C op against the just-Deinitialized NFC chip.
-	// Timeout safety net so a stuck Run() can't hang systemd shutdown.
-	// If Run() was never entered (e.g. main aborts before calling it),
-	// the timeout path keeps Stop() from blocking forever.
+	// Run owns the NFC handle and closes it before signalling done. Waiting
+	// avoids racing an in-flight I2C operation during shutdown.
 	select {
 	case <-s.done:
 	case <-time.After(5 * time.Second):
-		s.logger.Warn("Stop: timed out waiting for Run() to return, tearing down anyway")
+		s.logger.Warn("Stop: timed out waiting for Run() to return")
 	}
 
 	if s.rgbLed != nil {
 		if err := s.rgbLed.Close(); err != nil {
 			s.logger.Warn("Failed to close LED", "error", err)
 		}
-	}
-	if s.nfc != nil {
-		s.nfc.Deinitialize()
 	}
 	if s.redis != nil {
 		if err := s.redis.Close(); err != nil {
@@ -435,6 +494,9 @@ func (s *Service) resetAll() {
 }
 
 func (s *Service) publishKeycardCounts() {
+	if s.redis == nil {
+		return
+	}
 	if err := s.redis.PublishKeycardCounts(s.auth.GetMasterCount(), s.auth.GetAuthorizedCount()); err != nil {
 		s.logger.Warn("Failed to publish keycard counts", "error", err)
 	}
