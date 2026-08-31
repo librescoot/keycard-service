@@ -112,11 +112,18 @@ func (s *Service) Run() error {
 		"hasMaster", s.auth.HasMaster())
 	s.publishKeycardCounts()
 	if !s.auth.HasMaster() {
-		// Not during service mode: an installer or technician is driving the
+		// Auto-learning a master is for a factory-fresh reader only. With
+		// authorized cards enrolled, the next tap is an owner expecting to
+		// unlock, and crowning it master runs SetMaster, which wipes the
+		// authorized list: their other cards die on the spot. An installer-
+		// provisioned scooter boots in exactly that state. And not during
+		// service mode either: there an installer or technician drives the
 		// scooter over commands, and a reader waiting to crown the next tap
-		// as master is exactly the accident that flow has to fence off. The
-		// ordinary no-master boot still auto-learns.
-		if s.redis.ServiceModeActive() {
+		// is the accident that flow has to fence off. The genuinely empty
+		// no-master boot still auto-learns.
+		if s.auth.GetAuthorizedCount() > 0 {
+			s.logger.Info("No master stored, but authorized cards exist - not entering master learning mode")
+		} else if s.redis.ServiceModeActive() {
 			s.logger.Info("No master stored, but service mode is active - not entering master learning mode")
 		} else {
 			s.enterMasterLearningMode()
