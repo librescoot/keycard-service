@@ -49,6 +49,17 @@ func (r *RedisClient) ClearNFCUnavailableFault() error {
 	return r.faults.Clear(1)
 }
 
+// ServiceModeActive reports whether settings-service publishes its service
+// overlay as live. A missing field or read error reads as inactive, so the
+// gate built on this can only ever suppress a convenience, not block auth.
+func (r *RedisClient) ServiceModeActive() bool {
+	value, err := r.client.Hash("settings").Get("dashboard.service-mode-active")
+	if err != nil {
+		return false
+	}
+	return value == "true"
+}
+
 // PublishKeycardCounts writes pairing counts to the shared "system" hash.
 // The "keycard" hash is reserved for transient auth events with a 10s
 // expiry, so persistent ambient state lives elsewhere.

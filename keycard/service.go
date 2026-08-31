@@ -112,7 +112,15 @@ func (s *Service) Run() error {
 		"hasMaster", s.auth.HasMaster())
 	s.publishKeycardCounts()
 	if !s.auth.HasMaster() {
-		s.enterMasterLearningMode()
+		// Not during service mode: an installer or technician is driving the
+		// scooter over commands, and a reader waiting to crown the next tap
+		// as master is exactly the accident that flow has to fence off. The
+		// ordinary no-master boot still auto-learns.
+		if s.redis.ServiceModeActive() {
+			s.logger.Info("No master stored, but service mode is active - not entering master learning mode")
+		} else {
+			s.enterMasterLearningMode()
+		}
 	}
 	go s.watchCommands(s.ctx)
 
