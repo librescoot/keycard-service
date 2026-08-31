@@ -373,6 +373,11 @@ func (s *Service) enterMasterLearningMode() {
 	s.rgbLed.StartBlink(blinkInterval)
 }
 
+func (s *Service) exitMasterLearningMode() {
+	s.masterLearningMode = false
+	s.rgbLed.StopBlink()
+}
+
 func (s *Service) learnMasterUID(uid string) {
 	s.logger.Info("Learning master UID", "uid", uid)
 

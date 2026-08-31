@@ -124,9 +124,13 @@ func (s *Service) WatchCommands(ctx context.Context) {
 		case command == "learn:start":
 			if s.learnMode {
 				s.publishResult("error:already in learn mode")
-			} else if s.masterLearningMode {
-				s.publishResult("error:in master learning mode")
 			} else {
+				// A caller asking for learn mode has answered the question the
+				// boot-time master learning mode is waiting on: mode changes
+				// are driven by commands here, not by a master tap.
+				if s.masterLearningMode {
+					s.exitMasterLearningMode()
+				}
 				s.enterLearnMode()
 				s.logger.Info("Learn mode started via command")
 				s.publishResult("ok")
@@ -146,21 +150,32 @@ func (s *Service) WatchCommands(ctx context.Context) {
 				s.publishResult("error:already in master teach-in")
 			} else if s.learnMode {
 				s.publishResult("error:in learn mode")
-			} else if s.masterLearningMode {
-				s.publishResult("error:in master learning mode")
 			} else {
+				// Teach-in supersedes the boot-time master learning mode: both
+				// exist to produce a master, and the command-driven one is the
+				// one whose semantics (AddMaster, no wipe) the caller chose.
+				if s.masterLearningMode {
+					s.exitMasterLearningMode()
+				}
 				s.enterMasterTeachIn()
 				s.logger.Info("Master teach-in started via command")
 				s.publishResult("ok")
 			}
 
 		case command == "learn:master:stop":
-			if !s.masterTeachInMode {
-				s.publishResult("error:not in master teach-in")
-			} else {
+			if s.masterTeachInMode {
 				s.exitMasterTeachIn()
 				s.logger.Info("Master teach-in stopped via command")
 				s.publishResult("ok")
+			} else if s.masterLearningMode {
+				// The installer sends this blind to make sure no master-
+				// capturing mode survives a service (re)start. The boot-time
+				// mode is exactly such a mode, so stopping it is the intent.
+				s.exitMasterLearningMode()
+				s.logger.Info("Master learning mode stopped via command")
+				s.publishResult("ok")
+			} else {
+				s.publishResult("error:not in master teach-in")
 			}
 
 		case command == "reset":
