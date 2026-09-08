@@ -17,9 +17,14 @@ and publishes authentication and administration events through Redis.
 
 ## Operation and Redis interface
 
-On first start without a master UID, the service enters master-learning mode.
-A master-card tap enters regular learn mode; cards collected during that mode
-are saved when the master card is tapped again. Authorized-card taps publish a
+An authorized card unlocks the vehicle. A master card starts learn mode and
+never unlocks; a UID holds one role or the other.
+
+On first start without a master UID, and only on a reader with no authorized
+cards and no active service mode, the service enters master bootstrap, where
+the next tap becomes the master. `master:bootstrap-cancel` leaves that mode
+without writing anything. A master-card tap enters regular learn mode; cards
+collected during that mode are appended when the master card is tapped again. Authorized-card taps publish a
 transient `keycard` hash with `authentication=passed`, `type=scooter`, and the
 UID, then set a 10-second expiration. The notification is published on the
 `keycard` channel with payload `authentication`.
@@ -30,7 +35,9 @@ Master and authorized counts are published in the `system` hash as
 Administrative commands are read from the `scooter:keycard` Redis list. They
 cover listing, counting, adding, and removing authorized UIDs; setting a
 master; regular and master teach-in; and reset. Results are written to
-`keycard.command-result`. Learn-mode events are published on `keycard:events`.
+`keycard.command-result` as prose, and to `keycard.command-error` as a
+machine-readable code; prefer the code where the field is present. Every state
+change is published on `keycard:events`.
 Use the source-defined command vocabulary and result format when integrating;
 this README intentionally does not duplicate generated or protocol-level help.
 
@@ -41,7 +48,9 @@ The relevant deployment settings select the PN7150 device, Redis address, UID
 data directory, logging, and optional LP5562 I2C device/address.
 
 By default, UIDs are stored under `/data/keycard` in `master_uids.txt` and
-`authorized_uids.txt`. When no LP5562 device is configured, LED feedback uses
+`authorized_uids.txt`, as bare uppercase hex. Separators are accepted on read.
+A `master_uids.txt` holding only `NONE` records that this vehicle wants no
+physical master. When no LP5562 device is configured, LED feedback uses
 `/usr/bin/greenled.sh` and `/usr/bin/ledcontrol.sh`.
 
 UID files are authorization data, and the Redis command list can change them.

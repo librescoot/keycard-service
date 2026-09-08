@@ -14,6 +14,15 @@ const (
 	flashDuration = 500 * time.Millisecond
 )
 
+// Triggers name what caused a state change, so a subscriber can tell a tap
+// apart from a command.
+const (
+	TriggerCard      = "card"
+	TriggerCommand   = "command"
+	TriggerBootstrap = "bootstrap"
+	TriggerTeachIn   = "teach-in"
+)
+
 type Config struct {
 	Device     string
 	DataDir    string
@@ -38,10 +47,10 @@ type Service struct {
 	watchCommands    func(context.Context)
 	waitForReconnect func(time.Duration) bool
 
-	masterLearningMode bool
-	masterTeachInMode  bool
-	learnMode          bool
-	newUIDs            []string
+	masterBootstrapMode bool
+	masterTeachInMode   bool
+	learnMode           bool
+	newUIDs             []string
 
 	currentCardUID string // Empty when no card is present.
 	nfcFaultActive bool
@@ -110,23 +119,24 @@ func (s *Service) Run() error {
 		"device", s.config.Device,
 		"dataDir", s.config.DataDir,
 		"hasMaster", s.auth.HasMaster())
+
+	if rejected := s.auth.Rejected(); len(rejected) > 0 {
+		// Dropped at load, so gone from the files on the next write.
+		s.logger.Warn("Ignored malformed UID file entries",
+			"count", len(rejected), "entries", strings.Join(rejected, ", "))
+	}
+
 	s.publishKeycardCounts()
 	if !s.auth.HasMaster() {
-		// Auto-learning a master is for a factory-fresh reader only. With
-		// authorized cards enrolled, the next tap is an owner expecting to
-		// unlock, and crowning it master runs SetMaster, which wipes the
-		// authorized list: their other cards die on the spot. An installer-
-		// provisioned scooter boots in exactly that state. And not during
-		// service mode either: there an installer or technician drives the
-		// scooter over commands, and a reader waiting to crown the next tap
-		// is the accident that flow has to fence off. The genuinely empty
-		// no-master boot still auto-learns.
+		// Only a factory-fresh reader bootstraps. With cards enrolled the next
+		// tap is an owner expecting to unlock, and a master never unlocks; in
+		// service mode a technician is driving the vehicle over commands.
 		if s.auth.GetAuthorizedCount() > 0 {
-			s.logger.Info("No master stored, but authorized cards exist - not entering master learning mode")
+			s.logger.Info("No master stored, but authorized cards exist - not entering master bootstrap")
 		} else if s.redis.ServiceModeActive() {
-			s.logger.Info("No master stored, but service mode is active - not entering master learning mode")
+			s.logger.Info("No master stored, but service mode is active - not entering master bootstrap")
 		} else {
-			s.enterMasterLearningMode()
+			s.enterMasterBootstrap()
 		}
 	}
 	go s.watchCommands(s.ctx)
@@ -297,7 +307,7 @@ func (s *Service) clearNFCFaultIndication() {
 	}
 	s.nfcFaultActive = false
 	s.rgbLed.StopBlink()
-	if s.masterLearningMode || s.masterTeachInMode {
+	if s.masterBootstrapMode || s.masterTeachInMode {
 		if err := s.rgbLed.Amber(); err != nil {
 			s.logger.Warn("Failed to restore NFC LED", "error", err)
 		}
@@ -359,15 +369,15 @@ func (s *Service) handleTagArrival(uid string) {
 		return
 	}
 
-	if s.masterLearningMode {
-		s.learnMasterUID(uid)
+	if s.masterBootstrapMode {
+		s.bootstrapMasterUID(uid)
 		return
 	}
 
 	if !s.learnMode {
 		if s.auth.IsMaster(uid) {
-			s.enterLearnMode()
-		} else if s.auth.IsAuthorized(uid) {
+			s.enterLearnMode(TriggerCard)
+		} else if s.auth.CanUnlock(uid) {
 			s.grantAccess(uid)
 		} else {
 			s.logger.Info("Unauthorized UID", "uid", uid)
@@ -375,72 +385,78 @@ func (s *Service) handleTagArrival(uid string) {
 		}
 	} else {
 		if s.auth.IsMaster(uid) {
-			s.exitLearnMode()
+			s.exitLearnMode(TriggerCard)
 		} else {
 			s.learnUID(uid)
 		}
 	}
 }
 
-func (s *Service) enterMasterLearningMode() {
-	s.logger.Info("Entering master learning mode - present master card")
-	s.masterLearningMode = true
+// enterMasterBootstrap arms the boot-time bootstrap: the next card presented
+// becomes master. Announced, because no tap should claim the vehicle unobserved.
+func (s *Service) enterMasterBootstrap() {
+	s.logger.Info("Entering master bootstrap - the next card presented becomes master")
+	s.masterBootstrapMode = true
 	s.rgbLed.StartBlink(blinkInterval)
+	s.publishEvent("mode-entered:master-bootstrap:boot")
 }
 
-func (s *Service) exitMasterLearningMode() {
-	s.masterLearningMode = false
+// cancelMasterBootstrap leaves bootstrap without writing anything.
+func (s *Service) cancelMasterBootstrap(trigger string) {
+	if !s.masterBootstrapMode {
+		return
+	}
+	s.masterBootstrapMode = false
 	s.rgbLed.StopBlink()
+	if err := s.rgbLed.Off(); err != nil {
+		s.logger.Warn("Failed to set LED", "error", err)
+	}
+	s.logger.Info("Master bootstrap cancelled", "trigger", trigger)
+	s.publishEvent("mode-exited:master-bootstrap:" + trigger)
 }
 
-func (s *Service) learnMasterUID(uid string) {
+func (s *Service) bootstrapMasterUID(uid string) {
 	s.logger.Info("Learning master UID", "uid", uid)
 
 	if err := s.auth.SetMaster(uid); err != nil {
 		s.logger.Error("Failed to save master UID", "error", err)
 		s.flashLED(s.rgbLed.Red, flashDuration)
+		s.publishEvent("error:save-failed:" + uid)
 		return
 	}
 	s.publishKeycardCounts()
 
-	s.masterLearningMode = false
+	s.masterBootstrapMode = false
 	s.rgbLed.StopBlink()
 	s.rgbLed.Flash(flashDuration)
 
 	s.logger.Info("Master UID learned successfully", "uid", uid)
+	s.publishEvent("master-added:" + uid + ":" + TriggerBootstrap)
+	s.publishEvent("mode-exited:master-bootstrap:" + TriggerCard)
 }
 
-// enterMasterTeachIn enters the command-driven master teach-in mode used by
-// the installer flow. Unlike masterLearningMode (which fires automatically at
-// boot when no master exists and uses SetMaster — wiping authorized cards),
-// this mode appends a master via AddMaster and rejects taps that match an
-// already-registered UID.
+// enterMasterTeachIn is the command-driven counterpart to bootstrap: it
+// appends via AddMaster and rejects an already-registered UID.
 func (s *Service) enterMasterTeachIn() {
 	s.logger.Info("Entering master teach-in mode - present a fresh card to register as master")
 	s.masterTeachInMode = true
 	s.rgbLed.StartBlink(blinkInterval)
-	if err := s.redis.PublishKeycardEvent("mode-entered:master"); err != nil {
-		s.logger.Warn("Failed to publish event", "error", err)
-	}
+	s.publishEvent("mode-entered:master")
 }
 
 func (s *Service) exitMasterTeachIn() {
 	s.masterTeachInMode = false
 	s.rgbLed.StopBlink()
-	if err := s.redis.PublishKeycardEvent("mode-exited:master"); err != nil {
-		s.logger.Warn("Failed to publish event", "error", err)
-	}
+	s.publishEvent("mode-exited:master")
 }
 
 func (s *Service) teachInMasterUID(uid string) {
 	uid = strings.ToUpper(uid)
 
-	if s.auth.IsAuthorized(uid) {
+	if s.auth.IsKnown(uid) {
 		s.logger.Info("Master teach-in rejected: UID already registered", "uid", uid)
 		s.flashLED(s.rgbLed.Red, flashDuration)
-		if err := s.redis.PublishKeycardEvent("rejected:already-authorized:" + uid); err != nil {
-			s.logger.Warn("Failed to publish event", "error", err)
-		}
+		s.publishEvent("rejected:already-authorized:" + uid)
 		return
 	}
 
@@ -448,18 +464,14 @@ func (s *Service) teachInMasterUID(uid string) {
 	if err != nil {
 		s.logger.Error("Failed to add master UID", "uid", uid, "error", err)
 		s.flashLED(s.rgbLed.Red, flashDuration)
-		if err := s.redis.PublishKeycardEvent("error:save-failed:" + uid); err != nil {
-			s.logger.Warn("Failed to publish event", "error", err)
-		}
+		s.publishEvent("error:save-failed:" + uid)
 		return
 	}
 	if !added {
 		// Race: AddMaster found the UID already present even though the
 		// IsAuthorized check above missed it. Treat as a duplicate.
 		s.flashLED(s.rgbLed.Red, flashDuration)
-		if err := s.redis.PublishKeycardEvent("rejected:already-authorized:" + uid); err != nil {
-			s.logger.Warn("Failed to publish event", "error", err)
-		}
+		s.publishEvent("rejected:already-authorized:" + uid)
 		return
 	}
 
@@ -469,27 +481,20 @@ func (s *Service) teachInMasterUID(uid string) {
 	s.rgbLed.Flash(flashDuration)
 
 	s.logger.Info("Master UID added via teach-in", "uid", uid)
-	if err := s.redis.PublishKeycardEvent("master-learned:" + uid); err != nil {
-		s.logger.Warn("Failed to publish event", "error", err)
-	}
-	if err := s.redis.PublishKeycardEvent("mode-exited:master"); err != nil {
-		s.logger.Warn("Failed to publish event", "error", err)
-	}
+	// master-learned is what the installer matches on; master-added is the
+	// same fact in the vocabulary every other path uses.
+	s.publishEvent("master-learned:" + uid)
+	s.publishEvent("master-added:" + uid + ":" + TriggerTeachIn)
+	s.publishEvent("mode-exited:master")
 }
 
-// resetAll cancels any active mode, wipes master + authorized lists, and
-// republishes counts. Does not auto-enter masterLearningMode — leaves the
-// service idle so the caller can drive the next state explicitly. On the
-// next service restart, the boot-time HasMaster() check fires auto-learn
-// as usual.
+// resetAll wipes both lists and cancels any active mode, leaving the service
+// idle rather than re-entering bootstrap; the next start decides that.
 func (s *Service) resetAll() {
 	if s.masterTeachInMode {
 		s.exitMasterTeachIn()
 	}
-	if s.masterLearningMode {
-		s.masterLearningMode = false
-		s.rgbLed.StopBlink()
-	}
+	s.cancelMasterBootstrap(TriggerCommand)
 	if s.learnMode {
 		s.learnMode = false
 		s.blinkerLed.LedLinearOff(Led3)
@@ -498,6 +503,7 @@ func (s *Service) resetAll() {
 		if err := s.rgbLed.Off(); err != nil {
 			s.logger.Warn("Failed to set LED", "error", err)
 		}
+		s.publishEvent("mode-exited:learn:" + TriggerCommand)
 	}
 
 	if err := s.auth.Reset(); err != nil {
@@ -508,8 +514,14 @@ func (s *Service) resetAll() {
 
 	s.publishKeycardCounts()
 	s.logger.Info("Auth state reset")
-	if err := s.redis.PublishKeycardEvent("reset"); err != nil {
-		s.logger.Warn("Failed to publish event", "error", err)
+	s.publishEvent("reset")
+}
+
+// Fire-and-forget: a failed event must not change what the vehicle does about
+// the card in front of it.
+func (s *Service) publishEvent(payload string) {
+	if err := s.redis.PublishKeycardEvent(payload); err != nil {
+		s.logger.Warn("Failed to publish event", "payload", payload, "error", err)
 	}
 }
 
@@ -522,19 +534,17 @@ func (s *Service) publishKeycardCounts() {
 	}
 }
 
-func (s *Service) enterLearnMode() {
-	s.logger.Info("Entering learn mode - present cards to authorize")
+func (s *Service) enterLearnMode(trigger string) {
+	s.logger.Info("Entering learn mode - present cards to authorize", "trigger", trigger)
 	s.learnMode = true
 	s.newUIDs = nil
 	s.blinkerLed.LedLinearOn(Led3)
 	s.blinkerLed.LedLinearOn(Led7)
+	s.publishEvent("mode-entered:learn:" + trigger)
 }
 
-// exitLearnMode commits this session's collected UIDs to the authorized
-// list. Cards are appended (not replaced) — to remove a card or wipe the
-// list, use the remove:<uid> or reset commands. Any UID that has been
-// concurrently authorized via another writer is silently skipped.
-func (s *Service) exitLearnMode() {
+// exitLearnMode appends this session's UIDs to the authorized list.
+func (s *Service) exitLearnMode(trigger string) {
 	// handleTagArrival leaves the LED amber for the whole learn session, so
 	// clear it here before any branch decides whether to flash. Without this
 	// the sessions that neither flash nor error out (nothing presented, or
@@ -577,20 +587,17 @@ func (s *Service) exitLearnMode() {
 	s.blinkerLed.LedLinearOff(Led3)
 	s.blinkerLed.LedLinearOff(Led7)
 	s.newUIDs = nil
+	s.publishEvent("mode-exited:learn:" + trigger)
 }
 
-// learnUID is called for each non-master tap during learnMode. New UIDs are
-// queued in s.newUIDs (committed by exitLearnMode); already-authorized or
-// in-session UIDs are rejected with a red flash. Per-tap events are
-// published to keycard:events so subscribers (e.g. the installer) can
-// update live UI without waiting for the post-stop count refresh — the
-// count hash itself stays stable until exitLearnMode persists the session.
+// learnUID queues a tap for exitLearnMode to commit. The per-tap event is the
+// only live signal: the count hash does not move until the session persists.
 func (s *Service) learnUID(uid string) {
 	if s.auth.IsMaster(uid) {
 		return
 	}
 
-	duplicate := s.auth.IsAuthorized(uid)
+	duplicate := s.auth.IsKnown(uid)
 	if !duplicate {
 		for _, existing := range s.newUIDs {
 			if existing == uid {
@@ -602,9 +609,7 @@ func (s *Service) learnUID(uid string) {
 	if duplicate {
 		s.logger.Info("UID rejected as duplicate", "uid", uid)
 		s.flashLED(s.rgbLed.Red, flashDuration)
-		if err := s.redis.PublishKeycardEvent("card-duplicate:" + uid); err != nil {
-			s.logger.Warn("Failed to publish event", "error", err)
-		}
+		s.publishEvent("card-duplicate:" + uid)
 		return
 	}
 
@@ -618,9 +623,7 @@ func (s *Service) learnUID(uid string) {
 		}
 	})
 	s.logger.Info("UID learned", "uid", uid)
-	if err := s.redis.PublishKeycardEvent("card-learned:" + uid); err != nil {
-		s.logger.Warn("Failed to publish event", "error", err)
-	}
+	s.publishEvent("card-learned:" + uid)
 }
 
 func (s *Service) grantAccess(uid string) {
@@ -629,6 +632,7 @@ func (s *Service) grantAccess(uid string) {
 	if err := s.redis.PublishAuth(uid); err != nil {
 		s.logger.Error("Failed to publish auth to Redis", "error", err)
 	}
+	s.publishEvent("access-granted:" + uid)
 
 	s.flashLED(s.rgbLed.Green, flashDuration)
 }

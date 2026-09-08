@@ -2,6 +2,7 @@ package keycard
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,6 +45,7 @@ type AuthManager struct {
 	dataDir        string
 	masterUIDs     []string
 	authorizedUIDs []string
+	rejected       []string
 }
 
 func NewAuthManager(dataDir string) (*AuthManager, error) {
@@ -74,104 +76,133 @@ func (am *AuthManager) authorizedFilePath() string {
 	return filepath.Join(am.dataDir, "authorized_uids.txt")
 }
 
-// UID lists accept manual spacing and case, but retain normalized values in memory.
-func (am *AuthManager) loadMasterUIDs() error {
-	am.masterUIDs = nil
-
-	data, err := os.ReadFile(am.masterFilePath())
+// loadUIDFile drops blank, comment and malformed lines; a malformed entry can
+// never match a tap.
+func loadUIDFile(path string) ([]string, []string, error) {
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil
+		return nil, nil, nil
 	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var uids, rejected []string
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		uid, err := NormalizeUID(line)
+		if err != nil {
+			rejected = append(rejected, line)
+			continue
+		}
+		uids = append(uids, uid)
+	}
+	return uids, rejected, scanner.Err()
+}
+
+func (am *AuthManager) loadMasterUIDs() error {
+	uids, rejected, err := loadUIDFile(am.masterFilePath())
 	if err != nil {
 		return err
 	}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		uid := strings.TrimSpace(scanner.Text())
-		if uid != "" {
-			uid = strings.ToUpper(strings.ReplaceAll(uid, " ", ""))
-			am.masterUIDs = append(am.masterUIDs, uid)
-		}
-	}
-	return scanner.Err()
+	am.masterUIDs = uids
+	am.rejected = append(am.rejected, rejected...)
+	return nil
 }
 
 func (am *AuthManager) loadAuthorizedUIDs() error {
-	am.authorizedUIDs = nil
-
-	data, err := os.ReadFile(am.authorizedFilePath())
-	if os.IsNotExist(err) {
-		return nil
-	}
+	uids, rejected, err := loadUIDFile(am.authorizedFilePath())
 	if err != nil {
 		return err
 	}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		uid := strings.TrimSpace(scanner.Text())
-		if uid != "" {
-			uid = strings.ToUpper(strings.ReplaceAll(uid, " ", ""))
-			am.authorizedUIDs = append(am.authorizedUIDs, uid)
-		}
-	}
-	return scanner.Err()
+	am.authorizedUIDs = uids
+	am.rejected = append(am.rejected, rejected...)
+	return nil
 }
 
+// Rejected returns the lines dropped at load, for logging once at startup.
+func (am *AuthManager) Rejected() []string {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return append([]string(nil), am.rejected...)
+}
+
+// ErrLastCredential means a removal would leave no card able to unlock.
+// Masters do not count towards that: a master never grants access.
+var ErrLastCredential = errors.New("would remove the last card that can unlock")
+
+// HasMaster reports whether anything at all is on file, sentinel included.
+// For real master cards, use GetMasterCount.
 func (am *AuthManager) HasMaster() bool {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	return len(am.masterUIDs) > 0
 }
 
+// IsMaster reports whether uid is a master card, which starts learn mode
+// rather than unlocking.
 func (am *AuthManager) IsMaster(uid string) bool {
+	uid, err := NormalizeUID(uid)
+	if err != nil || uid == MasterDisabled {
+		return false
+	}
+
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	uid = strings.ToUpper(uid)
-	for _, m := range am.masterUIDs {
-		if m == uid {
+	return contains(am.masterUIDs, uid)
+}
+
+// CanUnlock reports whether uid may grant access. Only authorized cards may.
+func (am *AuthManager) CanUnlock(uid string) bool {
+	uid, err := NormalizeUID(uid)
+	if err != nil || uid == MasterDisabled {
+		return false
+	}
+
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return contains(am.authorizedUIDs, uid)
+}
+
+// IsKnown reports registration in either role. Kept separate from CanUnlock,
+// which is the access decision.
+func (am *AuthManager) IsKnown(uid string) bool {
+	uid, err := NormalizeUID(uid)
+	if err != nil || uid == MasterDisabled {
+		return false
+	}
+
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return contains(am.masterUIDs, uid) || contains(am.authorizedUIDs, uid)
+}
+
+func contains(list []string, uid string) bool {
+	for _, e := range list {
+		if e == uid {
 			return true
 		}
 	}
 	return false
 }
 
-func (am *AuthManager) IsAuthorized(uid string) bool {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	uid = strings.ToUpper(uid)
-
-	for _, m := range am.masterUIDs {
-		if m == uid {
-			return true
-		}
-	}
-
-	for _, a := range am.authorizedUIDs {
-		if a == uid {
-			return true
-		}
-	}
-	return false
-}
-
+// SetMaster replaces the master list. It does not touch authorized cards;
+// wiping is what Reset is for.
 func (am *AuthManager) SetMaster(uid string) error {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
-	uid = strings.ToUpper(uid)
-	am.masterUIDs = []string{uid}
-
-	if err := am.saveMasterUIDs(); err != nil {
+	uid, err := NormalizeUID(uid)
+	if err != nil {
 		return err
 	}
 
-	if uid != "NONE" {
-		am.authorizedUIDs = nil
-		return am.saveAuthorizedUIDs()
-	}
-	return nil
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	am.masterUIDs = []string{uid}
+	return am.saveMasterUIDs()
 }
 
 // Reset clears and persists both lists together for installer start-over flows.
@@ -188,70 +219,120 @@ func (am *AuthManager) Reset() error {
 	return am.saveAuthorizedUIDs()
 }
 
-// AddMaster adds a master without changing authorized cards; registered UIDs are rejected.
+// AddMaster appends a master. False if uid is already registered in either role.
 func (am *AuthManager) AddMaster(uid string) (bool, error) {
+	uid, err := NormalizeUID(uid)
+	if err != nil {
+		return false, err
+	}
+	if uid == MasterDisabled {
+		return false, ErrInvalidUID
+	}
+
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	uid = strings.ToUpper(uid)
-
-	for _, m := range am.masterUIDs {
-		if m == uid {
-			return false, nil
-		}
-	}
-
-	for _, a := range am.authorizedUIDs {
-		if a == uid {
-			return false, nil
-		}
+	if contains(am.masterUIDs, uid) || contains(am.authorizedUIDs, uid) {
+		return false, nil
 	}
 
 	am.masterUIDs = append(am.masterUIDs, uid)
 	return true, am.saveMasterUIDs()
 }
 
-func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
+// RemoveMaster drops a master. Removing the last one is allowed: a vehicle
+// with no master is recoverable, unlike one with no card that can unlock.
+func (am *AuthManager) RemoveMaster(uid string) (bool, error) {
+	uid, err := NormalizeUID(uid)
+	if err != nil {
+		return false, err
+	}
+
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	uid = strings.ToUpper(uid)
-
-	for _, m := range am.masterUIDs {
+	for i, m := range am.masterUIDs {
 		if m == uid {
-			return false, nil
+			am.masterUIDs = append(am.masterUIDs[:i], am.masterUIDs[i+1:]...)
+			return true, am.saveMasterUIDs()
 		}
 	}
+	return false, nil
+}
 
-	for _, a := range am.authorizedUIDs {
-		if a == uid {
-			return false, nil
+// ClearMasters empties the master list, sentinel included. The next start
+// re-arms bootstrap.
+func (am *AuthManager) ClearMasters() error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	am.masterUIDs = nil
+	return am.saveMasterUIDs()
+}
+
+// ListMasters excludes the MasterDisabled sentinel.
+func (am *AuthManager) ListMasters() []string {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	result := make([]string, 0, len(am.masterUIDs))
+	for _, m := range am.masterUIDs {
+		if m != MasterDisabled {
+			result = append(result, m)
 		}
+	}
+	return result
+}
+
+// AddAuthorized appends a card. False if uid is already registered in either role.
+func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
+	uid, err := NormalizeUID(uid)
+	if err != nil {
+		return false, err
+	}
+	if uid == MasterDisabled {
+		return false, ErrInvalidUID
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	if contains(am.masterUIDs, uid) || contains(am.authorizedUIDs, uid) {
+		return false, nil
 	}
 
 	am.authorizedUIDs = append(am.authorizedUIDs, uid)
 	return true, am.saveAuthorizedUIDs()
 }
 
+// RemoveAuthorized drops a card, keeping at least one able to unlock.
+// Membership is checked first so an absent card reads as not found.
 func (am *AuthManager) RemoveAuthorized(uid string) (bool, error) {
+	uid, err := NormalizeUID(uid)
+	if err != nil {
+		return false, err
+	}
+
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	uid = strings.ToUpper(uid)
-
-	// Prevent removing the last authorized card (anti-lockout)
-	if len(am.authorizedUIDs) <= 1 {
-		return false, fmt.Errorf("cannot remove last authorized card")
-	}
-
+	idx := -1
 	for i, a := range am.authorizedUIDs {
 		if a == uid {
-			am.authorizedUIDs = append(am.authorizedUIDs[:i], am.authorizedUIDs[i+1:]...)
-			return true, am.saveAuthorizedUIDs()
+			idx = i
+			break
 		}
 	}
+	if idx < 0 {
+		return false, nil
+	}
 
-	return false, nil
+	if len(am.authorizedUIDs) == 1 {
+		return false, ErrLastCredential
+	}
+
+	am.authorizedUIDs = append(am.authorizedUIDs[:idx], am.authorizedUIDs[idx+1:]...)
+	return true, am.saveAuthorizedUIDs()
 }
 
 func (am *AuthManager) ListAuthorized() []string {
@@ -263,28 +344,19 @@ func (am *AuthManager) ListAuthorized() []string {
 	return result
 }
 
-func (am *AuthManager) ReplaceAuthorized(uids []string) error {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
-	am.authorizedUIDs = uids
-	return am.saveAuthorizedUIDs()
-}
-
 func (am *AuthManager) GetAuthorizedCount() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	return len(am.authorizedUIDs)
 }
 
-// GetMasterCount returns the number of real master UIDs, excluding the
-// "NONE" sentinel that means physical master is intentionally disabled.
+// GetMasterCount excludes the MasterDisabled sentinel.
 func (am *AuthManager) GetMasterCount() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	n := 0
 	for _, m := range am.masterUIDs {
-		if m != "NONE" {
+		if m != MasterDisabled {
 			n++
 		}
 	}

@@ -95,20 +95,39 @@ func (r *RedisClient) PublishAuth(uid string) error {
 
 // PublishKeycardEvent publishes a transient event to the keycard:events
 // PUBSUB channel. Subscribers (installer, BLE bridge, ...) get real-time
-// notifications during teach-in flows. Format: "<event>" or "<event>:<uid>".
+// notifications for every state change, whether a Redis command or a tap on
+// the reader caused it. A subscriber that only ever hears about the changes
+// it asked for cannot stay in step with the vehicle.
 //
-// Master teach-in (learn:master:start/stop):
-//   - "mode-entered:master"
-//   - "mode-exited:master"
-//   - "master-learned:DEADBEEF"
-//   - "rejected:already-authorized:DEADBEEF"
-//   - "error:save-failed:DEADBEEF"
+// Payloads are colon-separated, "<event>[:<uid>][:<trigger>]", where trigger
+// is one of card, command, bootstrap, teach-in.
 //
-// Regular learn mode (learn:start/stop, or master-card-tap):
-//   - "card-learned:DEADBEEF"   (queued for commit on learn:stop)
-//   - "card-duplicate:DEADBEEF" (already authorized or already in session)
+// Modes:
+//   - "mode-entered:learn:<trigger>" / "mode-exited:learn:<trigger>"
+//   - "mode-entered:master" / "mode-exited:master"  (teach-in; no trigger
+//     suffix, this is the payload the installer already matches on)
+//   - "mode-entered:master-bootstrap:boot"
+//   - "mode-exited:master-bootstrap:<trigger>"
 //
-// Reset:
+// Cards:
+//   - "card-learned:<uid>"       (learn-mode tap, queued until learn:stop)
+//   - "card-duplicate:<uid>"     (already registered, or already this session)
+//   - "card-added:<uid>:command"
+//   - "card-removed:<uid>:command"
+//   - "access-granted:<uid>"
+//
+// Masters:
+//   - "master-added:<uid>:<trigger>"
+//   - "master-learned:<uid>"     (teach-in only; same fact as master-added
+//     with the teach-in trigger, kept for the installer)
+//   - "master-removed:<uid>:command"
+//   - "masters-cleared"
+//
+// Failures:
+//   - "rejected:already-authorized:<uid>"
+//   - "error:save-failed:<uid>"
+//
+// Whole-state:
 //   - "reset"
 func (r *RedisClient) PublishKeycardEvent(payload string) error {
 	if _, err := r.client.Publish(keycardEventChannel, payload); err != nil {
