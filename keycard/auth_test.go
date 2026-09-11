@@ -153,6 +153,36 @@ func TestSetMaster_KeepsAuthorized(t *testing.T) {
 	}
 }
 
+func TestSetMaster_RejectsAuthorizedUID(t *testing.T) {
+	dir := t.TempDir()
+	am, err := NewAuthManager(dir)
+	if err != nil {
+		t.Fatalf("NewAuthManager failed: %v", err)
+	}
+	if err := am.SetMaster(master1); err != nil {
+		t.Fatalf("SetMaster failed: %v", err)
+	}
+	mustAddAuthorized(t, am, user1)
+
+	if err := am.SetMaster("11:22:33:44"); !errors.Is(err, ErrAlreadyRegistered) {
+		t.Fatalf("SetMaster(authorized UID) error = %v, want ErrAlreadyRegistered", err)
+	}
+	if !am.IsMaster(master1) || am.IsMaster(user1) {
+		t.Error("a rejected SetMaster must preserve the previous master")
+	}
+	if !am.CanUnlock(user1) {
+		t.Error("a rejected SetMaster must preserve the authorized role")
+	}
+
+	reloaded, err := NewAuthManager(dir)
+	if err != nil {
+		t.Fatalf("NewAuthManager (reload) failed: %v", err)
+	}
+	if !reloaded.IsMaster(master1) || reloaded.IsMaster(user1) || !reloaded.CanUnlock(user1) {
+		t.Error("a rejected SetMaster must not create a cross-role duplicate after restart")
+	}
+}
+
 func TestSetMaster_Disabled(t *testing.T) {
 	am := newAM(t)
 	mustAddAuthorized(t, am, user1)
@@ -342,6 +372,52 @@ func TestLoad_NormalizesAndRejects(t *testing.T) {
 	rejected := am.Rejected()
 	if len(rejected) != 1 || rejected[0] != "NOTHEX" {
 		t.Errorf("Rejected() = %v, want [NOTHEX]", rejected)
+	}
+}
+
+func TestLoad_RejectsCrossRoleDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "master_uids.txt"),
+		[]byte(master1+"\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "authorized_uids.txt"),
+		[]byte("AA:BB:CC:DD\n"+user1+"\nNONE\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	am, err := NewAuthManager(dir)
+	if err != nil {
+		t.Fatalf("NewAuthManager failed: %v", err)
+	}
+	if !am.IsMaster(master1) {
+		t.Error("master role should take deterministic precedence")
+	}
+	if am.CanUnlock(master1) {
+		t.Error("cross-role duplicate must not be authorized")
+	}
+	if got := am.ListAuthorized(); len(got) != 1 || got[0] != user1 {
+		t.Errorf("ListAuthorized() = %v, want [%s]", got, user1)
+	}
+	if got := am.Rejected(); len(got) != 2 || got[0] != master1 || got[1] != MasterDisabled {
+		t.Errorf("Rejected() = %v, want [%s %s]", got, master1, MasterDisabled)
+	}
+
+	if removed, err := am.RemoveMaster(master1); err != nil || !removed {
+		t.Fatalf("RemoveMaster() = %v, %v, want true, nil", removed, err)
+	}
+	reloaded, err := NewAuthManager(dir)
+	if err != nil {
+		t.Fatalf("NewAuthManager after master removal failed: %v", err)
+	}
+	if reloaded.IsKnown(master1) || reloaded.CanUnlock(master1) {
+		t.Error("rejected cross-role UID reappeared after master removal and restart")
+	}
+	if got := reloaded.ListAuthorized(); len(got) != 1 || got[0] != user1 {
+		t.Errorf("reloaded ListAuthorized() = %v, want [%s]", got, user1)
+	}
+	if got := reloaded.Rejected(); len(got) != 0 {
+		t.Errorf("reloaded Rejected() = %v, want persisted clean files", got)
 	}
 }
 

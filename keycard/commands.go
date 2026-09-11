@@ -67,6 +67,8 @@ func errorCode(err error) string {
 		return codeBadUID
 	case errors.Is(err, ErrLastCredential):
 		return codeLastCredential
+	case errors.Is(err, ErrAlreadyRegistered):
+		return codeAlreadyRegistered
 	default:
 		return codeSaveFailed
 	}

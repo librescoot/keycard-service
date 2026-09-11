@@ -119,21 +119,43 @@ func (am *AuthManager) loadAuthorizedUIDs() error {
 	if err != nil {
 		return err
 	}
-	am.authorizedUIDs = uids
+
+	// Masters load first and retain their role if manually edited files contain
+	// a cross-role duplicate. This matches tap handling, where master behavior
+	// takes precedence, while ensuring a UID is never active in both roles.
+	am.authorizedUIDs = make([]string, 0, len(uids))
+	removedConflict := false
+	for _, uid := range uids {
+		if uid == MasterDisabled || contains(am.masterUIDs, uid) {
+			rejected = append(rejected, uid)
+			removedConflict = true
+			continue
+		}
+		am.authorizedUIDs = append(am.authorizedUIDs, uid)
+	}
 	am.rejected = append(am.rejected, rejected...)
+	if removedConflict {
+		return am.saveAuthorizedUIDs()
+	}
 	return nil
 }
 
-// Rejected returns the lines dropped at load, for logging once at startup.
+// Rejected returns malformed or conflicting lines dropped at load, for logging
+// once at startup.
 func (am *AuthManager) Rejected() []string {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	return append([]string(nil), am.rejected...)
 }
 
-// ErrLastCredential means a removal would leave no card able to unlock.
-// Masters do not count towards that: a master never grants access.
-var ErrLastCredential = errors.New("would remove the last card that can unlock")
+var (
+	// ErrLastCredential means a removal would leave no card able to unlock.
+	// Masters do not count towards that: a master never grants access.
+	ErrLastCredential = errors.New("would remove the last card that can unlock")
+
+	// ErrAlreadyRegistered means a UID cannot be assigned a second role.
+	ErrAlreadyRegistered = errors.New("uid is already registered")
+)
 
 // HasMaster reports whether anything at all is on file, sentinel included.
 // For real master cards, use GetMasterCount.
@@ -191,7 +213,8 @@ func contains(list []string, uid string) bool {
 }
 
 // SetMaster replaces the master list. It does not touch authorized cards;
-// wiping is what Reset is for.
+// wiping is what Reset is for. An authorized UID cannot become a master until
+// it has been removed from the authorized list.
 func (am *AuthManager) SetMaster(uid string) error {
 	uid, err := NormalizeUID(uid)
 	if err != nil {
@@ -200,6 +223,10 @@ func (am *AuthManager) SetMaster(uid string) error {
 
 	am.mu.Lock()
 	defer am.mu.Unlock()
+
+	if uid != MasterDisabled && contains(am.authorizedUIDs, uid) {
+		return ErrAlreadyRegistered
+	}
 
 	am.masterUIDs = []string{uid}
 	return am.saveMasterUIDs()

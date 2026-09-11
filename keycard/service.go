@@ -3,6 +3,7 @@ package keycard
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -122,7 +123,7 @@ func (s *Service) Run() error {
 
 	if rejected := s.auth.Rejected(); len(rejected) > 0 {
 		// Dropped at load, so gone from the files on the next write.
-		s.logger.Warn("Ignored malformed UID file entries",
+		s.logger.Warn("Ignored invalid or conflicting UID file entries",
 			"count", len(rejected), "entries", strings.Join(rejected, ", "))
 	}
 
@@ -419,6 +420,12 @@ func (s *Service) bootstrapMasterUID(uid string) {
 	s.logger.Info("Learning master UID", "uid", uid)
 
 	if err := s.auth.SetMaster(uid); err != nil {
+		if errors.Is(err, ErrAlreadyRegistered) {
+			s.logger.Info("Master bootstrap rejected: UID already registered", "uid", uid)
+			s.flashLED(s.rgbLed.Red, flashDuration)
+			s.publishEvent("rejected:already-authorized:" + uid)
+			return
+		}
 		s.logger.Error("Failed to save master UID", "error", err)
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		s.publishEvent("error:save-failed:" + uid)
