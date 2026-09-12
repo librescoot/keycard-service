@@ -12,8 +12,8 @@ and publishes authentication and administration events through Redis.
 - Learns and manages master and authorized card UIDs.
 - Publishes successful authentication events for vehicle consumers.
 - Supports Redis command-driven card administration and learn modes.
-- Provides LED feedback through an LP5562 controller or the installed LED
-  control scripts.
+- Provides RGB card-feedback through an optional LP5562 controller and
+  turn-signal learn-mode indicators through the installed LED controller.
 
 ## Operation and Redis interface
 
@@ -50,8 +50,9 @@ data directory, logging, and optional LP5562 I2C device/address.
 By default, UIDs are stored under `/data/keycard` in `master_uids.txt` and
 `authorized_uids.txt`, as bare uppercase hex. Separators are accepted on read.
 A `master_uids.txt` holding only `NONE` records that this vehicle wants no
-physical master. When no LP5562 device is configured, LED feedback uses
-`/usr/bin/greenled.sh` and `/usr/bin/ledcontrol.sh`.
+physical master. When no LP5562 device is configured, RGB card feedback is
+intentionally disabled. Learn-mode turn-signal indicators continue to use
+`/usr/bin/ledcontrol.sh`.
 
 UID files are authorization data, and the Redis command list can change them.
 Protect both from untrusted local users and services. NFC UID matching alone is
@@ -76,7 +77,8 @@ starts after the vehicle service, and enables the LP5562 backend on
 `/dev/i2c-2`. The runtime requires a reachable Redis-compatible datastore,
 access to the configured PN7150 device, and a writable data directory. LP5562
 support additionally requires access to the configured I2C device; otherwise
-the two LED scripts must be present if visual feedback is required.
+RGB card feedback is disabled while learn-mode turn-signal indicators remain
+available through the LED controller.
 
 The service handles `SIGINT` and `SIGTERM` and closes its NFC, LED, and Redis
 resources during shutdown. If the NFC reader is unavailable at startup or

@@ -30,7 +30,7 @@ type Config struct {
 	RedisAddr  string
 	Debug      bool
 	LogLevel   int
-	LEDDevice  string // LP5562 I2C device; empty selects the script fallback.
+	LEDDevice  string // LP5562 I2C device; empty disables RGB feedback.
 	LEDAddress uint8  // LP5562 I2C address.
 }
 
@@ -87,13 +87,14 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 	if config.LEDDevice != "" {
 		lp5562, err := NewLP5562(config.LEDDevice, config.LEDAddress, logger)
 		if err != nil {
-			logger.Warn("Failed to initialize LP5562, falling back to script-based LED", "error", err)
-			s.rgbLed = s.blinkerLed
+			logger.Warn("Failed to initialize LP5562; RGB feedback disabled", "error", err)
+			s.rgbLed = noOpRGBLed{}
 		} else {
 			s.rgbLed = lp5562
 		}
 	} else {
-		s.rgbLed = s.blinkerLed
+		logger.Info("No LP5562 device configured; RGB feedback disabled")
+		s.rgbLed = noOpRGBLed{}
 	}
 
 	s.redis, err = NewRedisClient(config.RedisAddr, logger)

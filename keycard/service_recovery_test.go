@@ -101,13 +101,12 @@ func newRecoveryTestService(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	led := NewLEDController(logger)
 	return &Service{
 		config:           &Config{Device: "/dev/does-not-matter"},
 		logger:           logger,
 		auth:             auth,
-		rgbLed:           led,
-		blinkerLed:       led,
+		rgbLed:           noOpRGBLed{},
+		blinkerLed:       NewLEDController(logger),
 		ctx:              ctx,
 		cancel:           cancel,
 		done:             make(chan struct{}),
