@@ -1,11 +1,13 @@
 package keycard
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
 
 	ipc "github.com/librescoot/redis-ipc"
+	redis "github.com/redis/go-redis/v9"
 )
 
 const (
@@ -58,6 +60,52 @@ func (r *RedisClient) ServiceModeActive() bool {
 		return false
 	}
 	return value == "true"
+}
+
+// PublishKeycardSnapshot writes pairing counts and replaces the dashboard's
+// UID snapshots. The transaction prevents a reader observing one new set with
+// the other still stale; notifications follow it so set readers refresh.
+func (r *RedisClient) PublishKeycardSnapshot(masters, authorized []string) error {
+	masterCount := len(masters)
+	authorizedCount := len(authorized)
+	if _, err := r.client.Raw().TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
+		pipe.Del(context.Background(), "keycard:authorized", "keycard:masters")
+		if len(authorized) > 0 {
+			members := make([]interface{}, len(authorized))
+			for i, uid := range authorized {
+				members[i] = uid
+			}
+			pipe.SAdd(context.Background(), "keycard:authorized", members...)
+		}
+		if len(masters) > 0 {
+			members := make([]interface{}, len(masters))
+			for i, uid := range masters {
+				members[i] = uid
+			}
+			pipe.SAdd(context.Background(), "keycard:masters", members...)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to publish keycard snapshots: %w", err)
+	}
+	if err := r.PublishKeycardCounts(masterCount, authorizedCount); err != nil {
+		return err
+	}
+	for _, setName := range []string{"keycard:authorized", "keycard:masters"} {
+		if _, err := r.client.Publish("system", setName); err != nil {
+			return fmt.Errorf("failed to publish keycard snapshot notification: %w", err)
+		}
+	}
+	return nil
+}
+
+// PublishLearnState persists the active enrollment mode for dashboard startup
+// and publishes it through the normal system hash channel.
+func (r *RedisClient) PublishLearnState(state string) error {
+	if err := r.client.Hash("system").Set("keycard-learn-state", state); err != nil {
+		return fmt.Errorf("failed to publish keycard learn state: %w", err)
+	}
+	return nil
 }
 
 // PublishKeycardCounts writes pairing counts to the shared "system" hash.

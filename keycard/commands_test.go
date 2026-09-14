@@ -47,6 +47,26 @@ func TestLegacyModeProse(t *testing.T) {
 	}
 }
 
+func TestParseRemoveCommand(t *testing.T) {
+	cases := []struct {
+		command string
+		uid     string
+		force   bool
+	}{
+		{"remove:11223344", "11223344", false},
+		{"remove:11223344:force", "11223344", true},
+		{"remove:11223344:force:force", "11223344:force", true},
+		{"remove::force", "", true},
+	}
+	for _, tc := range cases {
+		uid, force := parseRemoveCommand(tc.command)
+		if uid != tc.uid || force != tc.force {
+			t.Errorf("parseRemoveCommand(%q) = (%q, %t), want (%q, %t)",
+				tc.command, uid, force, tc.uid, tc.force)
+		}
+	}
+}
+
 func TestErrorCode(t *testing.T) {
 	if _, err := NormalizeUID(""); errorCode(err) != codeEmptyUID {
 		t.Errorf("empty uid mapped to %q", errorCode(err))

@@ -284,12 +284,12 @@ func TestRemoveAuthorized_Invariant(t *testing.T) {
 	}
 	mustAddAuthorized(t, am, user1)
 
-	removed, err := am.RemoveAuthorized(user2)
+	removed, err := am.RemoveAuthorized(user2, false)
 	if removed || err != nil {
 		t.Errorf("removing an absent card = %v, %v; want false, nil", removed, err)
 	}
 
-	removed, err = am.RemoveAuthorized(user1)
+	removed, err = am.RemoveAuthorized(user1, false)
 	if removed || !errors.Is(err, ErrLastCredential) {
 		t.Errorf("removing the only card = %v, %v; want ErrLastCredential", removed, err)
 	}
@@ -298,17 +298,46 @@ func TestRemoveAuthorized_Invariant(t *testing.T) {
 	if added, _ := am.AddMaster(master2); !added {
 		t.Fatal("AddMaster failed")
 	}
-	if removed, err := am.RemoveAuthorized(user1); removed || !errors.Is(err, ErrLastCredential) {
+	if removed, err := am.RemoveAuthorized(user1, false); removed || !errors.Is(err, ErrLastCredential) {
 		t.Errorf("a second master must not satisfy the invariant: %v, %v", removed, err)
 	}
 
 	// Adding a second card does.
 	mustAddAuthorized(t, am, user2)
-	if removed, err := am.RemoveAuthorized("11 22 33 44"); !removed || err != nil {
+	if removed, err := am.RemoveAuthorized("11 22 33 44", false); !removed || err != nil {
 		t.Errorf("RemoveAuthorized = %v, %v; want true, nil", removed, err)
 	}
 	if am.CanUnlock(user1) {
 		t.Error("the removed card should no longer unlock")
+	}
+}
+
+func TestRemoveAuthorized_ForceLastCard(t *testing.T) {
+	am := newAM(t)
+	mustAddAuthorized(t, am, user1)
+
+	if removed, err := am.RemoveAuthorized(user2, true); removed || err != nil {
+		t.Errorf("forced absent removal = %v, %v; want false, nil", removed, err)
+	}
+	if removed, err := am.RemoveAuthorized(user1, true); !removed || err != nil {
+		t.Errorf("forced last-card removal = %v, %v; want true, nil", removed, err)
+	}
+	if am.GetAuthorizedCount() != 0 {
+		t.Errorf("authorized count = %d; want 0", am.GetAuthorizedCount())
+	}
+}
+
+func TestRemoveAuthorized_ForceSaveFailurePreservesMemory(t *testing.T) {
+	am := newAM(t)
+	mustAddAuthorized(t, am, user1)
+
+	am.dataDir = "/dev/null"
+	removed, err := am.RemoveAuthorized(user1, true)
+	if removed || err == nil {
+		t.Fatalf("forced removal with an unwritable target = %v, %v; want false, error", removed, err)
+	}
+	if !am.CanUnlock(user1) || am.GetAuthorizedCount() != 1 {
+		t.Error("failed removal must keep the authorized card in memory")
 	}
 }
 

@@ -141,6 +141,14 @@ func legacyModeProse(command, mode string) string {
 //
 // Every state change is also published on keycard:events, whether a command or
 // a tap caused it.
+func parseRemoveCommand(command string) (uid string, force bool) {
+	uid = strings.TrimPrefix(command, "remove:")
+	if strings.HasSuffix(uid, ":force") {
+		return strings.TrimSuffix(uid, ":force"), true
+	}
+	return uid, false
+}
+
 func (s *Service) WatchCommands(ctx context.Context) {
 	s.logger.Info("Starting keycard command watcher", "key", keycardCommandList)
 
@@ -161,7 +169,8 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			s.handleAdd(strings.TrimPrefix(command, "add:"))
 
 		case strings.HasPrefix(command, "remove:"):
-			s.handleRemove(strings.TrimPrefix(command, "remove:"))
+			uid, force := parseRemoveCommand(command)
+			s.handleRemove(uid, force)
 
 		case strings.HasPrefix(command, "master:add:"):
 			s.handleMasterAdd(strings.TrimPrefix(command, "master:add:"))
@@ -175,7 +184,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 				s.publishError(errorCode(err))
 				return nil
 			}
-			s.publishKeycardCounts()
+			s.publishKeycardSnapshot()
 			s.publishEvent("masters-cleared")
 			s.logger.Info("Master list cleared via command")
 			s.publishResult(resultOK)
@@ -279,13 +288,13 @@ func (s *Service) handleAdd(uid string) {
 
 	normalized, _ := NormalizeUID(uid)
 	s.logger.Info("Card authorized via command", "uid", normalized)
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 	s.publishEvent("card-added:" + normalized + ":" + TriggerCommand)
 	s.publishResult(resultOK)
 }
 
-func (s *Service) handleRemove(uid string) {
-	removed, err := s.auth.RemoveAuthorized(uid)
+func (s *Service) handleRemove(uid string, force bool) {
+	removed, err := s.auth.RemoveAuthorized(uid, force)
 	if err != nil {
 		s.logger.Error("Failed to remove authorized card", "uid", uid, "error", err)
 		s.publishError(errorCode(err))
@@ -298,7 +307,7 @@ func (s *Service) handleRemove(uid string) {
 
 	normalized, _ := NormalizeUID(uid)
 	s.logger.Info("Card revoked via command", "uid", normalized)
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 	s.publishEvent("card-removed:" + normalized + ":" + TriggerCommand)
 	s.publishResult(resultOK)
 }
@@ -318,7 +327,7 @@ func (s *Service) handleMasterAdd(uid string) {
 	normalized, _ := NormalizeUID(uid)
 	s.cancelMasterBootstrap(TriggerCommand)
 	s.logger.Info("Master added via command", "uid", normalized)
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 	s.publishEvent("master-added:" + normalized + ":" + TriggerCommand)
 	s.publishResult(resultOK)
 }
@@ -337,7 +346,7 @@ func (s *Service) handleMasterRemove(uid string) {
 
 	normalized, _ := NormalizeUID(uid)
 	s.logger.Info("Master removed via command", "uid", normalized)
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 	s.publishEvent("master-removed:" + normalized + ":" + TriggerCommand)
 	s.publishResult(resultOK)
 }
@@ -352,7 +361,7 @@ func (s *Service) handleSetMaster(uid string) {
 
 	normalized, _ := NormalizeUID(uid)
 	s.cancelMasterBootstrap(TriggerCommand)
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 	if normalized == MasterDisabled {
 		s.publishEvent("masters-cleared")
 	} else {

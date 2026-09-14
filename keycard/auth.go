@@ -332,9 +332,10 @@ func (am *AuthManager) AddAuthorized(uid string) (bool, error) {
 	return true, am.saveAuthorizedUIDs()
 }
 
-// RemoveAuthorized drops a card, keeping at least one able to unlock.
-// Membership is checked first so an absent card reads as not found.
-func (am *AuthManager) RemoveAuthorized(uid string) (bool, error) {
+// RemoveAuthorized drops a card, keeping at least one able to unlock unless
+// force is explicitly requested. Membership is checked first so an absent card
+// reads as not found even when it is the final card.
+func (am *AuthManager) RemoveAuthorized(uid string, force bool) (bool, error) {
 	uid, err := NormalizeUID(uid)
 	if err != nil {
 		return false, err
@@ -354,12 +355,21 @@ func (am *AuthManager) RemoveAuthorized(uid string) (bool, error) {
 		return false, nil
 	}
 
-	if len(am.authorizedUIDs) == 1 {
+	if len(am.authorizedUIDs) == 1 && !force {
 		return false, ErrLastCredential
 	}
 
-	am.authorizedUIDs = append(am.authorizedUIDs[:idx], am.authorizedUIDs[idx+1:]...)
-	return true, am.saveAuthorizedUIDs()
+	updated := make([]string, 0, len(am.authorizedUIDs)-1)
+	updated = append(updated, am.authorizedUIDs[:idx]...)
+	updated = append(updated, am.authorizedUIDs[idx+1:]...)
+
+	previous := am.authorizedUIDs
+	am.authorizedUIDs = updated
+	if err := am.saveAuthorizedUIDs(); err != nil {
+		am.authorizedUIDs = previous
+		return false, err
+	}
+	return true, nil
 }
 
 func (am *AuthManager) ListAuthorized() []string {

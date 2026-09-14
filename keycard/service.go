@@ -116,6 +116,7 @@ type nfcFaultReporter interface {
 
 func (s *Service) Run() error {
 	defer close(s.done)
+	defer s.publishLearnState("idle")
 
 	s.logger.Info("Keycard service starting",
 		"device", s.config.Device,
@@ -128,7 +129,8 @@ func (s *Service) Run() error {
 			"count", len(rejected), "entries", strings.Join(rejected, ", "))
 	}
 
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
+	s.publishLearnState("idle")
 	if !s.auth.HasMaster() {
 		// Only a factory-fresh reader bootstraps. With cards enrolled the next
 		// tap is an owner expecting to unlock, and a master never unlocks; in
@@ -400,6 +402,7 @@ func (s *Service) enterMasterBootstrap() {
 	s.logger.Info("Entering master bootstrap - the next card presented becomes master")
 	s.masterBootstrapMode = true
 	s.rgbLed.StartBlink(blinkInterval)
+	s.publishLearnState("master-bootstrap")
 	s.publishEvent("mode-entered:master-bootstrap:boot")
 }
 
@@ -414,6 +417,7 @@ func (s *Service) cancelMasterBootstrap(trigger string) {
 		s.logger.Warn("Failed to set LED", "error", err)
 	}
 	s.logger.Info("Master bootstrap cancelled", "trigger", trigger)
+	s.publishLearnState("idle")
 	s.publishEvent("mode-exited:master-bootstrap:" + trigger)
 }
 
@@ -432,9 +436,10 @@ func (s *Service) bootstrapMasterUID(uid string) {
 		s.publishEvent("error:save-failed:" + uid)
 		return
 	}
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 
 	s.masterBootstrapMode = false
+	s.publishLearnState("idle")
 	s.rgbLed.StopBlink()
 	s.rgbLed.Flash(flashDuration)
 
@@ -449,12 +454,14 @@ func (s *Service) enterMasterTeachIn() {
 	s.logger.Info("Entering master teach-in mode - present a fresh card to register as master")
 	s.masterTeachInMode = true
 	s.rgbLed.StartBlink(blinkInterval)
+	s.publishLearnState("master-teach-in")
 	s.publishEvent("mode-entered:master")
 }
 
 func (s *Service) exitMasterTeachIn() {
 	s.masterTeachInMode = false
 	s.rgbLed.StopBlink()
+	s.publishLearnState("idle")
 	s.publishEvent("mode-exited:master")
 }
 
@@ -483,8 +490,9 @@ func (s *Service) teachInMasterUID(uid string) {
 		return
 	}
 
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
 	s.masterTeachInMode = false
+	s.publishLearnState("idle")
 	s.rgbLed.StopBlink()
 	s.rgbLed.Flash(flashDuration)
 
@@ -520,7 +528,8 @@ func (s *Service) resetAll() {
 		return
 	}
 
-	s.publishKeycardCounts()
+	s.publishKeycardSnapshot()
+	s.publishLearnState("idle")
 	s.logger.Info("Auth state reset")
 	s.publishEvent("reset")
 }
@@ -533,12 +542,21 @@ func (s *Service) publishEvent(payload string) {
 	}
 }
 
-func (s *Service) publishKeycardCounts() {
+func (s *Service) publishKeycardSnapshot() {
 	if s.redis == nil {
 		return
 	}
-	if err := s.redis.PublishKeycardCounts(s.auth.GetMasterCount(), s.auth.GetAuthorizedCount()); err != nil {
-		s.logger.Warn("Failed to publish keycard counts", "error", err)
+	if err := s.redis.PublishKeycardSnapshot(s.auth.ListMasters(), s.auth.ListAuthorized()); err != nil {
+		s.logger.Warn("Failed to publish keycard snapshot", "error", err)
+	}
+}
+
+func (s *Service) publishLearnState(state string) {
+	if s.redis == nil {
+		return
+	}
+	if err := s.redis.PublishLearnState(state); err != nil {
+		s.logger.Warn("Failed to publish keycard learn state", "error", err)
 	}
 }
 
@@ -548,6 +566,7 @@ func (s *Service) enterLearnMode(trigger string) {
 	s.newUIDs = nil
 	s.blinkerLed.LedLinearOn(Led3)
 	s.blinkerLed.LedLinearOn(Led7)
+	s.publishLearnState("learn")
 	s.publishEvent("mode-entered:learn:" + trigger)
 }
 
@@ -581,7 +600,7 @@ func (s *Service) exitLearnMode(trigger string) {
 		case added > 0:
 			s.logger.Info("Authorized cards added",
 				"added", added, "session", len(s.newUIDs))
-			s.publishKeycardCounts()
+			s.publishKeycardSnapshot()
 			s.rgbLed.Flash(flashDuration)
 		default:
 			s.logger.Info("No new cards added (all already authorized)")
@@ -592,6 +611,7 @@ func (s *Service) exitLearnMode(trigger string) {
 	}
 
 	s.learnMode = false
+	s.publishLearnState("idle")
 	s.blinkerLed.LedLinearOff(Led3)
 	s.blinkerLed.LedLinearOff(Led7)
 	s.newUIDs = nil
