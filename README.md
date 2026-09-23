@@ -39,8 +39,8 @@ master; regular and master teach-in; and reset. Results are written to
 `keycard.command-result` as prose, and to `keycard.command-error` as a
 machine-readable code; prefer the code where the field is present. Every state
 change is published on `keycard:events`.
-Use the source-defined command vocabulary and result format when integrating;
-this README intentionally does not duplicate generated or protocol-level help.
+The source-defined command vocabulary and result format are authoritative.
+The credential-name extension is described below.
 
 ## Configuration and local data
 
@@ -69,6 +69,23 @@ old fingerprint and enroll the new one.
 Android requires NFC and HCE support and may require the screen to be unlocked;
 this implementation explicitly requires both screen on and device unlocked.
 There is no iOS/Apple Watch HCE implementation in this branch.
+
+Optional credential names are stored in `/data/keycard/key_aliases.json`, keyed by
+`card:<UID>` (including master cards) or `phone:<32-hex-fingerprint>`. Names
+are UTF-8, up to 32 bytes, and never participate in authentication. The
+`scooter:keycard` commands `alias:list`, `alias:set:<kind>:<id>:<name>`, and
+`alias:clear:<kind>:<id>` operate only on enrolled credentials. `<name>` is
+unpadded base64url-encoded UTF-8. A list returns `count:<n>` followed by
+`alias:<kind>:<id>:<name>` entries; BLE forwards them with a `keycard:` prefix.
+Invalid names return `invalid-alias`, unknown credentials return `not-found`,
+and storage failures return `save-failed`. A credential removal or reset also
+removes its name. The service publishes `keycard:aliases` as a Redis set of
+`<kind>:<id>:<plain-name>` members and notifies the `system` channel; parsers
+split only the first two colons because names may contain colons. The
+`keycard:alias-ready` Redis key advertises protocol version `1`, renewed every
+10 seconds with a 30-second TTL so BLE can advertise `key-alias=1` only while
+the supporting service is running. If the names file is damaged, names become
+read-only until it is repaired, but credential authentication remains available.
 
 If `phone_keys.txt` is unreadable or contains invalid entries, phone access is
 **disabled** (no partially loaded keys are trusted), but already-enrolled
