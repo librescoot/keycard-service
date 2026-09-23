@@ -62,39 +62,59 @@ func (r *RedisClient) ServiceModeActive() bool {
 	return value == "true"
 }
 
-// PublishKeycardSnapshot writes pairing counts and replaces the dashboard's
-// UID snapshots. The transaction prevents a reader observing one new set with
-// the other still stale; notifications follow it so set readers refresh.
-func (r *RedisClient) PublishKeycardSnapshot(masters, authorized []string) error {
-	masterCount := len(masters)
-	authorizedCount := len(authorized)
+// PublishKeycardSnapshot replaces the dashboard's credential snapshots and
+// notifies set readers after the transaction commits.
+func (r *RedisClient) PublishKeycardSnapshot(masters, authorized, phones []string) error {
 	if _, err := r.client.Raw().TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
-		pipe.Del(context.Background(), "keycard:authorized", "keycard:masters")
-		if len(authorized) > 0 {
-			members := make([]interface{}, len(authorized))
-			for i, uid := range authorized {
-				members[i] = uid
+		pipe.Del(context.Background(), "keycard:authorized", "keycard:masters", "keycard:phones")
+		for setName, values := range map[string][]string{
+			"keycard:authorized": authorized,
+			"keycard:masters":    masters,
+			"keycard:phones":     phones,
+		} {
+			if len(values) == 0 {
+				continue
 			}
-			pipe.SAdd(context.Background(), "keycard:authorized", members...)
-		}
-		if len(masters) > 0 {
-			members := make([]interface{}, len(masters))
-			for i, uid := range masters {
-				members[i] = uid
+			members := make([]interface{}, len(values))
+			for i, value := range values {
+				members[i] = value
 			}
-			pipe.SAdd(context.Background(), "keycard:masters", members...)
+			pipe.SAdd(context.Background(), setName, members...)
 		}
 		return nil
 	}); err != nil {
 		return fmt.Errorf("failed to publish keycard snapshots: %w", err)
 	}
-	if err := r.PublishKeycardCounts(masterCount, authorizedCount); err != nil {
+	if err := r.PublishKeycardCounts(len(masters), len(authorized)); err != nil {
 		return err
 	}
-	for _, setName := range []string{"keycard:authorized", "keycard:masters"} {
+	lastUID, err := r.client.Hash("system").Get("keycard-last-used-uid")
+	if err != nil {
+		return fmt.Errorf("failed to read last used card: %w", err)
+	}
+	found := false
+	for _, uid := range authorized {
+		if uid == lastUID {
+			found = true
+			break
+		}
+	}
+	if lastUID != "" && !found {
+		if err := r.client.Hash("system").Set("keycard-last-used-uid", "", ipc.Sync()); err != nil {
+			return fmt.Errorf("failed to clear last used card: %w", err)
+		}
+	}
+	for _, setName := range []string{"keycard:authorized", "keycard:masters", "keycard:phones"} {
 		if _, err := r.client.Publish("system", setName); err != nil {
 			return fmt.Errorf("failed to publish keycard snapshot notification: %w", err)
 		}
+	}
+	return nil
+}
+
+func (r *RedisClient) PublishLastUsedCard(uid string) error {
+	if err := r.client.Hash("system").Set("keycard-last-used-uid", uid, ipc.Sync()); err != nil {
+		return fmt.Errorf("failed to publish last used card: %w", err)
 	}
 	return nil
 }

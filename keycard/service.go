@@ -600,7 +600,11 @@ func (s *Service) publishKeycardSnapshot() {
 	if s.redis == nil {
 		return
 	}
-	if err := s.redis.PublishKeycardSnapshot(s.auth.ListMasters(), s.auth.ListAuthorized()); err != nil {
+	var phones []string
+	if s.phones != nil {
+		phones = s.phones.list()
+	}
+	if err := s.redis.PublishKeycardSnapshot(s.auth.ListMasters(), s.auth.ListAuthorized(), phones); err != nil {
 		s.logger.Warn("Failed to publish keycard snapshot", "error", err)
 	}
 }
@@ -640,6 +644,7 @@ func (s *Service) exitLearnMode(trigger string) {
 			s.logger.Error("Failed to save phone credential", "error", err)
 			s.flashLED(s.rgbLed.Red, flashDuration)
 		} else {
+			s.publishKeycardSnapshot()
 			s.publishEvent("phone-added:" + phoneFingerprint(der))
 		}
 	}
@@ -723,6 +728,11 @@ func (s *Service) grantAccess(uid string) {
 
 	if err := s.redis.PublishAuth(uid); err != nil {
 		s.logger.Error("Failed to publish auth to Redis", "error", err)
+	}
+	if s.auth.CanUnlock(uid) {
+		if err := s.redis.PublishLastUsedCard(uid); err != nil {
+			s.logger.Warn("Failed to publish last used card", "uid", uid, "error", err)
+		}
 	}
 	s.publishEvent("access-granted:" + uid)
 

@@ -187,6 +187,7 @@ func (s *Service) WatchCommands(ctx context.Context) {
 				} else if !removed {
 					s.publishError(codeNotFound)
 				} else {
+					s.publishKeycardSnapshot()
 					s.publishEvent("phone-removed:" + strings.ToUpper(id))
 					s.publishResult(resultOK)
 				}
