@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 type recoveryTestNFC struct {
 	startErrors []error
 	awaitError  error
+	awaitFunc   func() error
 	started     chan struct{}
 	unblock     chan struct{}
 
@@ -43,6 +45,9 @@ func (n *recoveryTestNFC) StartDiscovery(uint) error {
 func (n *recoveryTestNFC) StopDiscovery() error    { return nil }
 func (n *recoveryTestNFC) FullReinitialize() error { return nil }
 func (n *recoveryTestNFC) AwaitReadable(time.Duration) error {
+	if n.awaitFunc != nil {
+		return n.awaitFunc()
+	}
 	if n.unblock != nil {
 		<-n.unblock
 	}
@@ -142,6 +147,45 @@ func stopRecoveryTestService(t *testing.T, service *Service, nfc *recoveryTestNF
 	}
 }
 
+func TestPollNFCIdleTimeoutKeepsDiscoveryActive(t *testing.T) {
+	for name, timeoutErr := range map[string]error{
+		"released HAL": errors.New("timeout waiting for NFC device to become readable"),
+		"typed HAL":    hal.NewI2CTimeoutError("timeout waiting for NFC device to become readable"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			service := newRecoveryTestService(t)
+			reader := &recoveryTestNFC{}
+			calls := 0
+			reader.awaitFunc = func() error {
+				calls++
+				if calls == 3 {
+					service.cancel()
+				}
+				return timeoutErr
+			}
+			service.nfc = reader
+			if err := service.pollNFC(); err != nil {
+				t.Fatal(err)
+			}
+			if reader.starts != 0 || calls != 3 {
+				t.Fatalf("starts = %d, polls = %d; want 0 starts, 3 polls", reader.starts, calls)
+			}
+		})
+	}
+}
+
+func TestPollNFCReadFailureTriggersReconnect(t *testing.T) {
+	service := newRecoveryTestService(t)
+	reader := &recoveryTestNFC{awaitError: errors.New("poll failed")}
+	service.nfc = reader
+	if err := service.pollNFC(); err == nil || !strings.Contains(err.Error(), "poll failed") {
+		t.Fatalf("pollNFC error = %v, want poll failure", err)
+	}
+	if reader.starts != 0 {
+		t.Fatalf("discovery restarted %d times before reconnect", reader.starts)
+	}
+}
+
 func TestNFCFailureBlinksRedUntilRecovery(t *testing.T) {
 	service := newRecoveryTestService(t)
 	led := &recoveryTestLED{}
@@ -198,8 +242,7 @@ func TestRunReconnectsNFCAndTransitionsFault(t *testing.T) {
 
 	service := newRecoveryTestService(t)
 	first := &recoveryTestNFC{
-		startErrors: []error{nil, errors.New("reader disconnected")},
-		awaitError:  errors.New("read failed"),
+		awaitError: errors.New("read failed"),
 	}
 	second := &recoveryTestNFC{
 		started:    make(chan struct{}),

@@ -243,6 +243,12 @@ func (s *Service) startDiscovery() error {
 	return nil
 }
 
+func isNFCIdleTimeout(err error) bool {
+	var nfcErr hal.NFCError
+	return errors.As(err, &nfcErr) && nfcErr.Code() == hal.ErrCodeI2CTimeout ||
+		err != nil && err.Error() == "timeout waiting for NFC device to become readable"
+}
+
 func (s *Service) pollNFC() error {
 	const (
 		pollTimeout   = 5 * time.Second
@@ -254,10 +260,10 @@ func (s *Service) pollNFC() error {
 			if s.ctx.Err() != nil {
 				return nil
 			}
-			if err := s.startDiscovery(); err != nil {
-				return err
+			if isNFCIdleTimeout(err) {
+				continue
 			}
-			continue
+			return fmt.Errorf("wait for NFC reader: %w", err)
 		}
 
 		tags, err := s.nfc.DetectTags()
