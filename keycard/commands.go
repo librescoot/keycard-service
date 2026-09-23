@@ -33,6 +33,7 @@ const (
 	codeAlreadyAuthorized = "already-authorized"
 	codeAlreadyRegistered = "already-registered"
 	codeNotFound          = "not-found"
+	codeInvalidAlias      = "invalid-alias"
 	codeLastCredential    = "last-credential"
 	codeSaveFailed        = "save-failed"
 	codeUnknownCommand    = "unknown-command"
@@ -47,6 +48,7 @@ var errorProse = map[string]string{
 	codeAlreadyAuthorized: "error:already authorized",
 	codeAlreadyRegistered: "error:already registered as a master",
 	codeNotFound:          "error:not found",
+	codeInvalidAlias:      "error:invalid alias",
 	codeLastCredential:    "error:cannot remove last authorized card",
 	codeSaveFailed:        "error:save failed",
 	codeUnknownCommand:    "error:unknown command",
@@ -131,6 +133,11 @@ func legacyModeProse(command, mode string) string {
 //   - "set-master:<uid>"        — replace the master list with one entry, or
 //     with NONE for no physical master
 //
+// Names:
+//   - "alias:list"                         — list enrolled credential names
+//   - "alias:set:<kind>:<id>:<base64url>" — name a card or phone
+//   - "alias:clear:<kind>:<id>"           — clear a name
+//
 // Modes:
 //   - "learn:start" / "learn:stop"               — regular learn mode, as if
 //     the master card had been tapped. Session taps are appended on stop.
@@ -153,7 +160,11 @@ func (s *Service) WatchCommands(ctx context.Context) {
 	s.logger.Info("Starting keycard command watcher", "key", keycardCommandList)
 
 	handler := ipc.HandleRequests(s.redis.client, keycardCommandList, func(command string) error {
-		s.logger.Info("Received keycard command", "command", command)
+		if strings.HasPrefix(command, "alias:set:") {
+			s.logger.Info("Received keycard command", "command", "alias:set")
+		} else {
+			s.logger.Info("Received keycard command", "command", command)
+		}
 
 		switch {
 		case command == "list":
@@ -171,6 +182,15 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			} else {
 				s.respondList("phone", s.phones.list())
 			}
+
+		case command == "alias:list":
+			s.handleAliasList()
+
+		case strings.HasPrefix(command, "alias:set:"):
+			s.handleAliasMutation(strings.TrimPrefix(command, "alias:set:"), false)
+
+		case strings.HasPrefix(command, "alias:clear:"):
+			s.handleAliasMutation(strings.TrimPrefix(command, "alias:clear:"), true)
 
 		case strings.HasPrefix(command, "phone:remove:"):
 			id, force := parseRemoveCommand(strings.TrimPrefix(command, "phone:"))

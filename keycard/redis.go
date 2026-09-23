@@ -113,6 +113,34 @@ func (r *RedisClient) PublishKeycardSnapshot(masters, authorized, phones []strin
 	return nil
 }
 
+// PublishKeyAliases replaces the dashboard's optional credential names.
+func (r *RedisClient) PublishKeyAliases(names map[string]string) error {
+	if _, err := r.client.Raw().TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
+		pipe.Del(context.Background(), "keycard:aliases")
+		entries := make([]interface{}, 0, len(names))
+		for _, key := range sortedAliases(names) {
+			entries = append(entries, key+":"+names[key])
+		}
+		if len(entries) > 0 {
+			pipe.SAdd(context.Background(), "keycard:aliases", entries...)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to publish key names: %w", err)
+	}
+	if _, err := r.client.Publish("system", "keycard:aliases"); err != nil {
+		return fmt.Errorf("failed to notify key names: %w", err)
+	}
+	return nil
+}
+
+func (r *RedisClient) PublishAliasReadiness() error {
+	if err := r.client.Raw().Set(context.Background(), "keycard:alias-ready", "1", 30*time.Second).Err(); err != nil {
+		return fmt.Errorf("failed to advertise key names: %w", err)
+	}
+	return nil
+}
+
 func (r *RedisClient) PublishLastUsedCard(uid string) error {
 	if err := r.client.Hash("system").Set("keycard-last-used-uid", uid, ipc.Sync()); err != nil {
 		return fmt.Errorf("failed to publish last used card: %w", err)

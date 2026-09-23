@@ -44,6 +44,7 @@ type Service struct {
 	nfcFactory       nfcFactory
 	auth             *AuthManager
 	phones           *phoneKeys
+	aliases          *keyAliases
 	rgbLed           RGBLed         // RAG card feedback LED.
 	blinkerLed       *LEDController // Turn-signal LEDs indicate learn mode.
 	redis            *RedisClient
@@ -92,6 +93,11 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 		// physical card. The store is disabled/read-only until explicitly
 		// repaired; no partially loaded phone keys are trusted.
 		logger.Error("Phone credentials disabled; physical cards remain available", "error", err)
+	}
+
+	s.aliases, err = newKeyAliases(config.DataDir)
+	if err != nil {
+		logger.Error("Key names disabled; credentials remain available", "error", err)
 	}
 
 	s.blinkerLed = NewLEDController(logger)
@@ -143,6 +149,9 @@ func (s *Service) Run() error {
 
 	s.publishKeycardSnapshot()
 	s.publishLearnState("idle")
+	if s.aliases != nil && s.aliases.health() == nil {
+		go s.maintainAliasReadiness(s.ctx)
+	}
 	if !s.auth.HasMaster() {
 		// Only a factory-fresh reader bootstraps. With cards enrolled the next
 		// tap is an owner expecting to unlock, and a master never unlocks; in
@@ -607,6 +616,7 @@ func (s *Service) publishKeycardSnapshot() {
 	if err := s.redis.PublishKeycardSnapshot(s.auth.ListMasters(), s.auth.ListAuthorized(), phones); err != nil {
 		s.logger.Warn("Failed to publish keycard snapshot", "error", err)
 	}
+	s.publishAliasSnapshot()
 }
 
 func (s *Service) publishLearnState(state string) {
