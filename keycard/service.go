@@ -319,6 +319,9 @@ func (s *Service) handleDetectedTag(tag hal.Tag) {
 			return
 		}
 		s.logger.Warn("Phone authentication failed", "error", err)
+		if phone && (s.learnMode || s.masterBootstrapMode || s.masterTeachInMode) {
+			s.publishEvent("phone-rejected")
+		}
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		return
 	}

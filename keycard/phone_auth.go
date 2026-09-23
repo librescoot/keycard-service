@@ -223,12 +223,16 @@ func (s *Service) readPhoneProof(tag hal.Tag) (bool, []byte, error) {
 func (s *Service) handlePhone(der []byte) {
 	if err := s.phones.health(); err != nil {
 		s.logger.Warn("Phone credentials unavailable", "error", err)
+		if s.learnMode || s.masterTeachInMode || s.masterBootstrapMode {
+			s.publishEvent("phone-error")
+		}
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		return
 	}
 	id := phoneFingerprint(der)
 	if s.masterTeachInMode || s.masterBootstrapMode {
 		s.logger.Info("Phone credential cannot become a master")
+		s.publishEvent("phone-rejected")
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		return
 	}
@@ -240,6 +244,7 @@ func (s *Service) handlePhone(der []byte) {
 		}
 		for _, pending := range s.newPhones {
 			if phoneFingerprint(pending) == id {
+				s.publishEvent("phone-duplicate:" + id)
 				s.flashLED(s.rgbLed.Red, flashDuration)
 				return
 			}

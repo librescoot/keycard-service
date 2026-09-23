@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +101,38 @@ type apduTestReader struct {
 }
 
 func (r apduTestReader) ExchangeAPDU(apdu []byte) ([]byte, error) { return r.respond(apdu) }
+
+func TestPendingPhoneDuplicatePublishesFeedback(t *testing.T) {
+	service, _ := newExclusivityTestService(t)
+	phones, err := newPhoneKeys(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.phones = phones
+	service.learnMode = true
+	der, _, _ := makePhoneProof(t)
+	ctx := context.Background()
+	listener := service.redis.client.Raw().Subscribe(ctx, "keycard:events")
+	defer listener.Close()
+	if _, err := listener.Receive(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service.handlePhone(der)
+	service.handlePhone(der)
+	for _, expected := range []string{"phone-learned:", "phone-duplicate:"} {
+		select {
+		case msg := <-listener.Channel():
+			if msg == nil || !strings.HasPrefix(msg.Payload, expected) {
+				t.Fatalf("event = %v, want %q", msg, expected)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing %s event", expected)
+		}
+	}
+	if len(service.newPhones) != 1 {
+		t.Fatalf("pending phone count = %d", len(service.newPhones))
+	}
+}
 
 func TestPhoneSelectRequiresISO_DEP(t *testing.T) {
 	service := &Service{}
