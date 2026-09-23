@@ -165,6 +165,22 @@ func (s *Service) WatchCommands(ctx context.Context) {
 		case command == "master:list":
 			s.respondList("master", s.auth.ListMasters())
 
+		case command == "phone:list":
+			s.respondList("phone", s.phones.list())
+
+		case strings.HasPrefix(command, "phone:remove:"):
+			id := strings.TrimPrefix(command, "phone:remove:")
+			removed, err := s.phones.remove(id)
+			switch {
+			case err != nil:
+				s.publishError(codeSaveFailed)
+			case !removed:
+				s.publishError(codeNotFound)
+			default:
+				s.publishEvent("phone-removed:" + strings.ToUpper(id))
+				s.publishResult(resultOK)
+			}
+
 		case strings.HasPrefix(command, "add:"):
 			s.handleAdd(strings.TrimPrefix(command, "add:"))
 
@@ -245,9 +261,12 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			}
 
 		case command == "reset":
-			s.resetAll()
-			s.logger.Info("Auth state reset via command")
-			s.publishResult(resultOK)
+			if err := s.resetAll(); err != nil {
+				s.publishError(codeSaveFailed)
+			} else {
+				s.logger.Info("Auth state reset via command")
+				s.publishResult(resultOK)
+			}
 
 		default:
 			s.logger.Warn("Unknown keycard command", "command", command)

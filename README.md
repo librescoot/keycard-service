@@ -9,6 +9,7 @@ and publishes authentication and administration events through Redis.
 ## Capabilities
 
 - Detects NFC tags through a PN7150 device.
+- Authenticates Android HCE phone keys with a fresh, signed ISO-DEP challenge (no SAM/cloud dependency).
 - Learns and manages master and authorized card UIDs.
 - Publishes successful authentication events for vehicle consumers.
 - Supports Redis command-driven card administration and learn modes.
@@ -54,9 +55,26 @@ physical master. When no LP5562 device is configured, RGB card feedback is
 intentionally disabled. Learn-mode turn-signal indicators continue to use
 `/usr/bin/ledcontrol.sh`.
 
+Android phone keys are separately stored under `/data/keycard/phone_keys.txt` as P-256
+SubjectPublicKeyInfo values. To enroll: set up the key in the Android app's
+Keycards screen, tap an existing master card to enter learn mode, tap the
+unlocked phone on the scooter reader, then tap the master again to commit.
+The phone is not a master card. `phone:list` and `phone:remove:<32-hex-fingerprint>`
+are available on the local `scooter:keycard` command list for inspection and
+revocation. A factory-fresh scooter still needs its normal master/bootstrap
+setup before phone enrollment. Losing/reinstalling the phone app loses its
+Android Keystore key; revoke its old fingerprint and enroll the new one.
+Android requires NFC and HCE support and may require the screen to be unlocked;
+this implementation explicitly requires both screen on and device unlocked.
+There is no iOS/Apple Watch HCE implementation in this branch.
+
 UID files are authorization data, and the Redis command list can change them.
 Protect both from untrusted local users and services. NFC UID matching alone is
-not a general-purpose credential-security guarantee.
+not a general-purpose credential-security guarantee. Existing physical cards
+continue to use legacy UID authorization; phone keys never trust the RF UID.
+NFC challenge–response prevents recorded APDU replay but is not a distance-
+bounding protocol and does not prevent live NFC relays or compromise of the
+scooter's local credentials/Redis access.
 
 ## Build and test
 

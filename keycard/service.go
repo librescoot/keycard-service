@@ -41,6 +41,7 @@ type Service struct {
 	nfc              nfcReader
 	nfcFactory       nfcFactory
 	auth             *AuthManager
+	phones           *phoneKeys
 	rgbLed           RGBLed         // RAG card feedback LED.
 	blinkerLed       *LEDController // Turn-signal LEDs indicate learn mode.
 	redis            *RedisClient
@@ -52,6 +53,7 @@ type Service struct {
 	masterTeachInMode   bool
 	learnMode           bool
 	newUIDs             []string
+	newPhones           [][]byte
 
 	currentCardUID string // Empty when no card is present.
 	nfcFaultActive bool
@@ -80,6 +82,12 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
+	}
+
+	s.phones, err = newPhoneKeys(config.DataDir)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to load phone credentials: %w", err)
 	}
 
 	s.blinkerLed = NewLEDController(logger)
@@ -135,8 +143,8 @@ func (s *Service) Run() error {
 		// Only a factory-fresh reader bootstraps. With cards enrolled the next
 		// tap is an owner expecting to unlock, and a master never unlocks; in
 		// service mode a technician is driving the vehicle over commands.
-		if s.auth.GetAuthorizedCount() > 0 {
-			s.logger.Info("No master stored, but authorized cards exist - not entering master bootstrap")
+		if s.auth.GetAuthorizedCount() > 0 || len(s.phones.list()) > 0 {
+			s.logger.Info("No master stored, but unlocking credentials exist - not entering master bootstrap")
 		} else if s.redis.ServiceModeActive() {
 			s.logger.Info("No master stored, but service mode is active - not entering master bootstrap")
 		} else {
@@ -253,7 +261,21 @@ func (s *Service) pollNFC() error {
 		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
 		s.logger.Info("Tag arrived", "uid", uid)
 		s.currentCardUID = uid
-		s.handleTagArrival(uid)
+		var phone bool
+		var der []byte
+		var phoneErr error
+		if !s.auth.IsKnown(uid) {
+			phone, der, phoneErr = s.readPhoneProof(tags[0])
+		}
+		switch {
+		case phoneErr != nil:
+			s.logger.Warn("Phone authentication failed", "error", phoneErr)
+			s.flashLED(s.rgbLed.Red, flashDuration)
+		case phone:
+			s.handlePhone(der)
+		default:
+			s.handleTagArrival(uid)
+		}
 
 		for {
 			if s.ctx.Err() != nil {
@@ -506,7 +528,7 @@ func (s *Service) teachInMasterUID(uid string) {
 
 // resetAll wipes both lists and cancels any active mode, leaving the service
 // idle rather than re-entering bootstrap; the next start decides that.
-func (s *Service) resetAll() {
+func (s *Service) resetAll() error {
 	if s.masterTeachInMode {
 		s.exitMasterTeachIn()
 	}
@@ -516,22 +538,31 @@ func (s *Service) resetAll() {
 		s.blinkerLed.LedLinearOff(Led3)
 		s.blinkerLed.LedLinearOff(Led7)
 		s.newUIDs = nil
+		s.newPhones = nil
 		if err := s.rgbLed.Off(); err != nil {
 			s.logger.Warn("Failed to set LED", "error", err)
 		}
 		s.publishEvent("mode-exited:learn:" + TriggerCommand)
 	}
 
+	// Reset revokes phone keys too. An incomplete reset is reported rather
+	// than silently leaving an enrolled credential able to unlock.
+	if err := s.phones.clear(); err != nil {
+		s.logger.Error("Failed to revoke phones during reset", "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		return err
+	}
 	if err := s.auth.Reset(); err != nil {
 		s.logger.Error("Failed to reset auth state", "error", err)
 		s.flashLED(s.rgbLed.Red, flashDuration)
-		return
+		return err
 	}
 
 	s.publishKeycardSnapshot()
 	s.publishLearnState("idle")
 	s.logger.Info("Auth state reset")
 	s.publishEvent("reset")
+	return nil
 }
 
 // Fire-and-forget: a failed event must not change what the vehicle does about
@@ -564,6 +595,7 @@ func (s *Service) enterLearnMode(trigger string) {
 	s.logger.Info("Entering learn mode - present cards to authorize", "trigger", trigger)
 	s.learnMode = true
 	s.newUIDs = nil
+	s.newPhones = nil
 	s.blinkerLed.LedLinearOn(Led3)
 	s.blinkerLed.LedLinearOn(Led7)
 	s.publishLearnState("learn")
@@ -580,6 +612,14 @@ func (s *Service) exitLearnMode(trigger string) {
 		s.logger.Warn("Failed to set LED", "error", err)
 	}
 
+	for _, der := range s.newPhones {
+		if err := s.phones.add(der); err != nil {
+			s.logger.Error("Failed to save phone credential", "error", err)
+			s.flashLED(s.rgbLed.Red, flashDuration)
+		} else {
+			s.publishEvent("phone-added:" + phoneFingerprint(der))
+		}
+	}
 	if len(s.newUIDs) > 0 {
 		added := 0
 		var saveErr error
@@ -615,6 +655,7 @@ func (s *Service) exitLearnMode(trigger string) {
 	s.blinkerLed.LedLinearOff(Led3)
 	s.blinkerLed.LedLinearOff(Led7)
 	s.newUIDs = nil
+	s.newPhones = nil
 	s.publishEvent("mode-exited:learn:" + trigger)
 }
 

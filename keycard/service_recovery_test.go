@@ -48,8 +48,9 @@ func (n *recoveryTestNFC) AwaitReadable(time.Duration) error {
 	}
 	return n.awaitError
 }
-func (n *recoveryTestNFC) DetectTags() ([]hal.Tag, error) { return nil, nil }
-func (n *recoveryTestNFC) SelectTag(uint) error           { return nil }
+func (n *recoveryTestNFC) DetectTags() ([]hal.Tag, error)      { return nil, nil }
+func (n *recoveryTestNFC) SelectTag(uint) error                { return nil }
+func (n *recoveryTestNFC) ExchangeAPDU([]byte) ([]byte, error) { return nil, nil }
 func (n *recoveryTestNFC) Close() {
 	n.mu.Lock()
 	defer n.mu.Unlock()

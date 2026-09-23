@@ -19,6 +19,7 @@ type nfcReader interface {
 	AwaitReadable(time.Duration) error
 	DetectTags() ([]hal.Tag, error)
 	SelectTag(uint) error
+	ExchangeAPDU([]byte) ([]byte, error)
 	Close()
 }
 
