@@ -61,7 +61,8 @@ Keycards screen, tap an existing master card to enter learn mode, tap the
 unlocked phone on the scooter reader, then tap the master again to commit.
 The phone is not a master card. `phone:list` and `phone:remove:<32-hex-fingerprint>`
 are available on the local `scooter:keycard` command list for inspection and
-revocation. A factory-fresh scooter still needs its normal master/bootstrap
+revocation. Removing the last unlock credential requires the explicit
+`phone:remove:<fingerprint>:force` command (or `reset`). A factory-fresh scooter still needs its normal master/bootstrap
 setup before phone enrollment. Losing/reinstalling the phone app loses its
 Android Keystore key; revoke its old fingerprint and enroll the new one.
 Android requires NFC and HCE support and may require the screen to be unlocked;

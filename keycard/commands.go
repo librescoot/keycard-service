@@ -169,16 +169,21 @@ func (s *Service) WatchCommands(ctx context.Context) {
 			s.respondList("phone", s.phones.list())
 
 		case strings.HasPrefix(command, "phone:remove:"):
-			id := strings.TrimPrefix(command, "phone:remove:")
-			removed, err := s.phones.remove(id)
-			switch {
-			case err != nil:
-				s.publishError(codeSaveFailed)
-			case !removed:
+			id, force := parseRemoveCommand(strings.TrimPrefix(command, "phone:"))
+			if !contains(s.phones.list(), strings.ToUpper(id)) {
 				s.publishError(codeNotFound)
-			default:
-				s.publishEvent("phone-removed:" + strings.ToUpper(id))
-				s.publishResult(resultOK)
+			} else if !force && len(s.phones.list()) == 1 && s.auth.GetAuthorizedCount() == 0 {
+				s.publishError(codeLastCredential)
+			} else {
+				removed, err := s.phones.remove(id)
+				if err != nil {
+					s.publishError(codeSaveFailed)
+				} else if !removed {
+					s.publishError(codeNotFound)
+				} else {
+					s.publishEvent("phone-removed:" + strings.ToUpper(id))
+					s.publishResult(resultOK)
+				}
 			}
 
 		case strings.HasPrefix(command, "add:"):
