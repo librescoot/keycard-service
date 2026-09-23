@@ -134,9 +134,9 @@ func (r *RedisClient) PublishKeyAliases(names map[string]string) error {
 	return nil
 }
 
-func (r *RedisClient) PublishAliasReadiness() error {
-	if err := r.client.Raw().Set(context.Background(), "keycard:alias-ready", "1", 30*time.Second).Err(); err != nil {
-		return fmt.Errorf("failed to advertise key names: %w", err)
+func (r *RedisClient) PublishProtocolVersion() error {
+	if err := r.client.Raw().Set(context.Background(), "keycard:protocol-version", "2", 30*time.Second).Err(); err != nil {
+		return fmt.Errorf("failed to advertise keycard protocol: %w", err)
 	}
 	return nil
 }

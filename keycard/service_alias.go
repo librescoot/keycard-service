@@ -1,11 +1,9 @@
 package keycard
 
 import (
-	"context"
 	"encoding/base64"
 	"errors"
 	"strings"
-	"time"
 )
 
 func (s *Service) validAliasKeys() map[string]bool {
@@ -108,20 +106,4 @@ func (s *Service) handleAliasMutation(command string, clear bool) {
 	}
 	s.publishAliasSnapshot()
 	s.publishResult(resultOK)
-}
-
-func (s *Service) maintainAliasReadiness(ctx context.Context) {
-	const interval = 10 * time.Second
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		if err := s.redis.PublishAliasReadiness(); err != nil {
-			s.logger.Warn("Failed to advertise key name support", "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }

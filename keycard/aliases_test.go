@@ -80,25 +80,25 @@ func TestKeyAliasWriteFailureAndCorruptFileNeverTrustPartialData(t *testing.T) {
 	}
 }
 
-func TestAliasReadinessExpiresWithoutHeartbeat(t *testing.T) {
+func TestProtocolVersionExpiresWithoutHeartbeat(t *testing.T) {
 	service, server := newExclusivityTestService(t)
-	if err := service.redis.PublishAliasReadiness(); err != nil {
+	if err := service.redis.PublishProtocolVersion(); err != nil {
 		t.Fatal(err)
 	}
-	if value, err := server.Get("keycard:alias-ready"); err != nil || value != "1" {
-		t.Fatalf("readiness = %q, %v", value, err)
+	if value, err := server.Get("keycard:protocol-version"); err != nil || value != "2" {
+		t.Fatalf("protocol version = %q, %v", value, err)
 	}
 	server.FastForward(20 * time.Second)
-	if err := service.redis.PublishAliasReadiness(); err != nil {
+	if err := service.redis.PublishProtocolVersion(); err != nil {
 		t.Fatal(err)
 	}
 	server.FastForward(20 * time.Second)
-	if !server.Exists("keycard:alias-ready") {
-		t.Fatal("renewed readiness expired early")
+	if !server.Exists("keycard:protocol-version") {
+		t.Fatal("renewed protocol version expired early")
 	}
 	server.FastForward(11 * time.Second)
-	if server.Exists("keycard:alias-ready") {
-		t.Fatal("readiness survived after backend stopped renewing it")
+	if server.Exists("keycard:protocol-version") {
+		t.Fatal("protocol version survived after backend stopped renewing it")
 	}
 }
 

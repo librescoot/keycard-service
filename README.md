@@ -82,9 +82,11 @@ and storage failures return `save-failed`. A credential removal or reset also
 removes its name. The service publishes `keycard:aliases` as a Redis set of
 `<kind>:<id>:<plain-name>` members and notifies the `system` channel; parsers
 split only the first two colons because names may contain colons. The
-`keycard:alias-ready` Redis key advertises protocol version `1`, renewed every
-10 seconds with a 30-second TTL so BLE can advertise `key-alias=1` only while
-the supporting service is running. If the names file is damaged, names become
+`keycard:protocol-version` in Redis advertises protocol version `2`, renewed
+every 10 seconds with a 30-second TTL so BLE can advertise `keycard=2` only
+while the supporting service is running. Version 2 includes phone management,
+master-card listing, and credential names; an unversioned `keycard` capability
+covers physical-card management only. If the names file is damaged, names become
 read-only until it is repaired, but credential authentication remains available.
 
 If `phone_keys.txt` is unreadable or contains invalid entries, phone access is
