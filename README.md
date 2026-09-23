@@ -62,12 +62,24 @@ unlocked phone on the scooter reader, then tap the master again to commit.
 The phone is not a master card. `phone:list` and `phone:remove:<32-hex-fingerprint>`
 are available on the local `scooter:keycard` command list for inspection and
 revocation. Removing the last unlock credential requires the explicit
-`phone:remove:<fingerprint>:force` command (or `reset`). A factory-fresh scooter still needs its normal master/bootstrap
-setup before phone enrollment. Losing/reinstalling the phone app loses its
-Android Keystore key; revoke its old fingerprint and enroll the new one.
+`phone:remove:<fingerprint>:force` command (or `reset`). A factory-fresh
+scooter still needs its normal master/bootstrap setup before phone enrollment.
+Losing/reinstalling the phone app loses its Android Keystore key; revoke its
+old fingerprint and enroll the new one.
 Android requires NFC and HCE support and may require the screen to be unlocked;
 this implementation explicitly requires both screen on and device unlocked.
 There is no iOS/Apple Watch HCE implementation in this branch.
+
+If `phone_keys.txt` is unreadable or contains invalid entries, phone access is
+**disabled** (no partially loaded keys are trusted), but already-enrolled
+physical cards still work. The service logs the error; `phone:list` and phone
+mutations return `save-failed`, and `reset` refuses to claim success because it
+cannot revoke all phone credentials. Back up and repair the file with valid
+P-256 SPKI hex entries, or intentionally remove it to revoke all phone keys,
+then restart the service. It is never silently overwritten while disabled.
+In an explicitly armed physical-card enrollment mode, a failed phone SELECT
+exchange still permits the legacy ISO-DEP card UID to be learned; once a
+phone AID was selected, a failed signature never downgrades to UID enrollment.
 
 UID files are authorization data, and the Redis command list can change them.
 Protect both from untrusted local users and services. NFC UID matching alone is

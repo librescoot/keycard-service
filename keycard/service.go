@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	hal "github.com/librescoot/pn7150"
 )
 
 const (
@@ -86,8 +88,10 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 
 	s.phones, err = newPhoneKeys(config.DataDir)
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to load phone credentials: %w", err)
+		// A phone credential file must not strand an owner who still has a
+		// physical card. The store is disabled/read-only until explicitly
+		// repaired; no partially loaded phone keys are trusted.
+		logger.Error("Phone credentials disabled; physical cards remain available", "error", err)
 	}
 
 	s.blinkerLed = NewLEDController(logger)
@@ -143,7 +147,11 @@ func (s *Service) Run() error {
 		// Only a factory-fresh reader bootstraps. With cards enrolled the next
 		// tap is an owner expecting to unlock, and a master never unlocks; in
 		// service mode a technician is driving the vehicle over commands.
-		if s.auth.GetAuthorizedCount() > 0 || len(s.phones.list()) > 0 {
+		if err := s.phones.health(); err != nil {
+			// An unreadable phone store is not a factory-fresh reader. Do not
+			// let its temporary absence re-arm next-tap master bootstrap.
+			s.logger.Warn("Phone credentials unavailable - not entering master bootstrap", "error", err)
+		} else if s.auth.GetAuthorizedCount() > 0 || len(s.phones.list()) > 0 {
 			s.logger.Info("No master stored, but unlocking credentials exist - not entering master bootstrap")
 		} else if s.redis.ServiceModeActive() {
 			s.logger.Info("No master stored, but service mode is active - not entering master bootstrap")
@@ -259,23 +267,8 @@ func (s *Service) pollNFC() error {
 		}
 
 		uid := strings.ToUpper(hex.EncodeToString(tags[0].ID))
-		s.logger.Info("Tag arrived", "uid", uid)
 		s.currentCardUID = uid
-		var phone bool
-		var der []byte
-		var phoneErr error
-		if !s.auth.IsKnown(uid) {
-			phone, der, phoneErr = s.readPhoneProof(tags[0])
-		}
-		switch {
-		case phoneErr != nil:
-			s.logger.Warn("Phone authentication failed", "error", phoneErr)
-			s.flashLED(s.rgbLed.Red, flashDuration)
-		case phone:
-			s.handlePhone(der)
-		default:
-			s.handleTagArrival(uid)
-		}
+		s.handleDetectedTag(tags[0])
 
 		for {
 			if s.ctx.Err() != nil {
@@ -295,6 +288,36 @@ func (s *Service) pollNFC() error {
 		}
 	}
 	return nil
+}
+
+// handleDetectedTag preserves UID handling for existing physical credentials.
+// In an explicitly armed enrollment mode, an ISO-DEP card whose SELECT cannot
+// be exchanged is still eligible for legacy UID enrollment. Once the phone AID
+// has responded successfully, any later error is a rejected phone proof; it
+// must never be downgraded to a UID enrollment.
+func (s *Service) handleDetectedTag(tag hal.Tag) {
+	uid := strings.ToUpper(hex.EncodeToString(tag.ID))
+	s.logger.Info("Tag arrived", "uid", uid)
+	if s.auth.IsKnown(uid) {
+		s.handleTagArrival(uid)
+		return
+	}
+	phone, der, err := s.readPhoneProof(tag)
+	if err != nil {
+		if !phone && (s.learnMode || s.masterBootstrapMode || s.masterTeachInMode) {
+			s.logger.Warn("Phone SELECT unavailable; enrolling legacy ISO-DEP card by UID", "error", err)
+			s.handleTagArrival(uid)
+			return
+		}
+		s.logger.Warn("Phone authentication failed", "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		return
+	}
+	if phone {
+		s.handlePhone(der)
+		return
+	}
+	s.handleTagArrival(uid)
 }
 
 func (s *Service) disconnectNFC() {

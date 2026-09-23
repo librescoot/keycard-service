@@ -28,9 +28,10 @@ var phoneDomain = []byte("librescoot-phone-unlock-v1\x00")
 const phoneSPKILength = 91
 
 type phoneKeys struct {
-	mu   sync.RWMutex
-	path string
-	keys map[string][]byte // fingerprint -> DER SubjectPublicKeyInfo
+	mu    sync.RWMutex
+	path  string
+	keys  map[string][]byte // fingerprint -> DER SubjectPublicKeyInfo
+	fault error             // A bad/unreadable file disables phone auth and mutations.
 }
 
 func phoneFingerprint(der []byte) string {
@@ -60,20 +61,31 @@ func newPhoneKeys(dir string) (*phoneKeys, error) {
 		return p, nil
 	}
 	if err != nil {
-		return nil, err
+		p.fault = fmt.Errorf("read phone credentials: %w", err)
+		return p, p.fault
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for lineNumber, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		der, err := hex.DecodeString(line)
 		if err != nil || validatePhoneKey(der) != nil {
-			return nil, fmt.Errorf("invalid enrolled phone key file")
+			// Never accept a partially loaded file: an operator must repair
+			// it explicitly, and legacy physical cards remain usable meanwhile.
+			p.keys = make(map[string][]byte)
+			p.fault = fmt.Errorf("invalid phone credential at line %d", lineNumber+1)
+			return p, p.fault
 		}
 		p.keys[phoneFingerprint(der)] = der
 	}
 	return p, nil
+}
+
+func (p *phoneKeys) health() error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.fault
 }
 
 func (p *phoneKeys) has(der []byte) bool {
@@ -107,6 +119,9 @@ func (p *phoneKeys) add(der []byte) error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.fault != nil {
+		return p.fault
+	}
 	id := phoneFingerprint(der)
 	if _, ok := p.keys[id]; ok {
 		return nil
@@ -122,6 +137,9 @@ func (p *phoneKeys) add(der []byte) error {
 func (p *phoneKeys) clear() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.fault != nil {
+		return p.fault
+	}
 	previous := p.keys
 	p.keys = make(map[string][]byte)
 	if err := p.save(); err != nil {
@@ -134,6 +152,9 @@ func (p *phoneKeys) clear() error {
 func (p *phoneKeys) remove(id string) (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.fault != nil {
+		return false, p.fault
+	}
 	id = strings.ToUpper(id)
 	old, ok := p.keys[id]
 	if !ok {
@@ -179,7 +200,9 @@ func (s *Service) readPhoneProof(tag hal.Tag) (bool, []byte, error) {
 	selectAPDU = append(selectAPDU, 0x00)
 	resp, err := s.nfc.ExchangeAPDU(selectAPDU)
 	if err != nil {
-		return true, nil, err // do not turn a failed exchange into UID access
+		// No phone application was selected. The caller may permit a
+		// legacy UID enrollment, but never an ordinary unlock.
+		return false, nil, err
 	}
 	if len(resp) != 2 || resp[0] != 0x90 || resp[1] != 0 {
 		return false, nil, nil
@@ -198,6 +221,11 @@ func (s *Service) readPhoneProof(tag hal.Tag) (bool, []byte, error) {
 }
 
 func (s *Service) handlePhone(der []byte) {
+	if err := s.phones.health(); err != nil {
+		s.logger.Warn("Phone credentials unavailable", "error", err)
+		s.flashLED(s.rgbLed.Red, flashDuration)
+		return
+	}
 	id := phoneFingerprint(der)
 	if s.masterTeachInMode || s.masterBootstrapMode {
 		s.logger.Info("Phone credential cannot become a master")
