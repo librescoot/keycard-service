@@ -21,7 +21,9 @@ func TestDashboardPhoneSnapshotAndLastUsedCard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service.publishKeycardSnapshot()
+	if err := service.redis.PublishKeycardSnapshot(service.auth.ListMasters(), service.auth.ListAuthorized(), phones.list()); err != nil {
+		t.Fatalf("snapshot without a last-used card: %v", err)
+	}
 	members, err := server.Members("keycard:phones")
 	if err != nil || !slices.Equal(members, []string{phoneFingerprint(der)}) {
 		t.Fatalf("phone snapshot = %v, %v", members, err)

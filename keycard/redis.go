@@ -2,6 +2,7 @@ package keycard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -89,7 +90,7 @@ func (r *RedisClient) PublishKeycardSnapshot(masters, authorized, phones []strin
 		return err
 	}
 	lastUID, err := r.client.Hash("system").Get("keycard-last-used-uid")
-	if err != nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return fmt.Errorf("failed to read last used card: %w", err)
 	}
 	found := false
