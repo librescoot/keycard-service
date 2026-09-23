@@ -13,7 +13,9 @@ import (
 	"unicode/utf8"
 )
 
-const maxAliasBytes = 48
+// A 32-byte name encodes to 43 base64url characters. With a 32-hex-digit
+// phone fingerprint, keycard:alias:set fits the 100-byte BLE command limit.
+const maxAliasBytes = 32
 
 var errInvalidAlias = errors.New("invalid key alias")
 

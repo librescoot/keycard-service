@@ -10,6 +10,11 @@ import (
 )
 
 func TestKeyAliasesPersistAndValidate(t *testing.T) {
+	longestCommand := "keycard:alias:set:phone:" + strings.Repeat("A", 32) + ":" +
+		base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("x", maxAliasBytes)))
+	if len(longestCommand) != 100 {
+		t.Fatalf("longest BLE alias command = %d bytes", len(longestCommand))
+	}
 	dir := t.TempDir()
 	aliases, err := newKeyAliases(dir)
 	if err != nil {
