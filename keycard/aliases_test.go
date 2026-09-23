@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestKeyAliasesPersistAndValidate(t *testing.T) {
@@ -76,6 +77,28 @@ func TestKeyAliasWriteFailureAndCorruptFileNeverTrustPartialData(t *testing.T) {
 	loaded, err := newKeyAliases(dir)
 	if err == nil || len(loaded.list()) != 0 {
 		t.Fatalf("partial file trusted: %v, %v", err, loaded.list())
+	}
+}
+
+func TestAliasReadinessExpiresWithoutHeartbeat(t *testing.T) {
+	service, server := newExclusivityTestService(t)
+	if err := service.redis.PublishAliasReadiness(); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := server.Get("keycard:alias-ready"); err != nil || value != "1" {
+		t.Fatalf("readiness = %q, %v", value, err)
+	}
+	server.FastForward(20 * time.Second)
+	if err := service.redis.PublishAliasReadiness(); err != nil {
+		t.Fatal(err)
+	}
+	server.FastForward(20 * time.Second)
+	if !server.Exists("keycard:alias-ready") {
+		t.Fatal("renewed readiness expired early")
+	}
+	server.FastForward(11 * time.Second)
+	if server.Exists("keycard:alias-ready") {
+		t.Fatal("readiness survived after backend stopped renewing it")
 	}
 }
 
