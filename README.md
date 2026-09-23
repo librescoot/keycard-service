@@ -81,13 +81,11 @@ Invalid names return `invalid-alias`, unknown credentials return `not-found`,
 and storage failures return `save-failed`. A credential removal or reset also
 removes its name. The service publishes `keycard:aliases` as a Redis set of
 `<kind>:<id>:<plain-name>` members and notifies the `system` channel; parsers
-split only the first two colons because names may contain colons. The
-`keycard:protocol-version` in Redis advertises protocol version `2`, renewed
-every 10 seconds with a 30-second TTL so BLE can advertise `keycard=2` only
-while the supporting service is running. Version 2 includes phone management,
-master-card listing, and credential names; an unversioned `keycard` capability
-covers physical-card management only. If the names file is damaged, names become
-read-only until it is repaired, but credential authentication remains available.
+split only the first two colons because names may contain colons. The bundled
+Bluetooth service advertises `keycard=2` for physical cards, phones, master
+listing and credential names. Requests are answered by keycard-service. If the
+names file is damaged, names become read-only until it is repaired, while
+credential authentication remains available.
 
 If `phone_keys.txt` is unreadable or contains invalid entries, phone access is
 **disabled** (no partially loaded keys are trusted), but already-enrolled

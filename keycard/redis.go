@@ -134,13 +134,6 @@ func (r *RedisClient) PublishKeyAliases(names map[string]string) error {
 	return nil
 }
 
-func (r *RedisClient) PublishProtocolVersion() error {
-	if err := r.client.Raw().Set(context.Background(), "keycard:protocol-version", "2", 30*time.Second).Err(); err != nil {
-		return fmt.Errorf("failed to advertise keycard protocol: %w", err)
-	}
-	return nil
-}
-
 func (r *RedisClient) PublishLastUsedCard(uid string) error {
 	if err := r.client.Hash("system").Set("keycard-last-used-uid", uid, ipc.Sync()); err != nil {
 		return fmt.Errorf("failed to publish last used card: %w", err)

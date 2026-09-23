@@ -149,12 +149,6 @@ func (s *Service) Run() error {
 
 	s.publishKeycardSnapshot()
 	s.publishLearnState("idle")
-	if s.redis != nil {
-		if err := s.redis.PublishProtocolVersion(); err != nil {
-			s.logger.Warn("Failed to advertise keycard protocol", "error", err)
-		}
-		go s.maintainProtocolVersion(s.ctx)
-	}
 	if !s.auth.HasMaster() {
 		// Only a factory-fresh reader bootstraps. With cards enrolled the next
 		// tap is an owner expecting to unlock, and a master never unlocks; in
@@ -386,21 +380,6 @@ func (s *Service) waitForNFCReconnect(delay time.Duration) bool {
 		return false
 	case <-time.After(delay):
 		return true
-	}
-}
-
-func (s *Service) maintainProtocolVersion(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := s.redis.PublishProtocolVersion(); err != nil {
-				s.logger.Warn("Failed to renew keycard protocol version", "error", err)
-			}
-		}
 	}
 }
 
