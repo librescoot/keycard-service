@@ -2,6 +2,7 @@ package keycard
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -77,6 +78,62 @@ func TestKeyAliasWriteFailureAndCorruptFileNeverTrustPartialData(t *testing.T) {
 	loaded, err := newKeyAliases(dir)
 	if err == nil || len(loaded.list()) != 0 {
 		t.Fatalf("partial file trusted: %v, %v", err, loaded.list())
+	}
+}
+
+func TestExistingCredentialFilesRemainReadableWithOptionalAliases(t *testing.T) {
+	dir := t.TempDir()
+	der, _, _ := makePhoneProof(t)
+	files := map[string][]byte{
+		"master_uids.txt":     []byte("AABBCCDD\n"),
+		"authorized_uids.txt": []byte("04010203\n"),
+		"phone_keys.txt":      []byte(hex.EncodeToString(der) + "\n"),
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aliases, err := newKeyAliases(dir)
+	if err != nil || len(aliases.list()) != 0 {
+		t.Fatalf("missing optional names file: %v, %v", err, aliases.list())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "key_aliases.json")); !os.IsNotExist(err) {
+		t.Fatalf("missing names file was created: %v", err)
+	}
+	if err := aliases.set("card:04010203", "Spare"); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "key_aliases.json")); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("names file permissions: %v, %v", info, err)
+	}
+	for name, original := range files {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(data) != string(original) {
+			t.Fatalf("credential file %s changed: %q, %v", name, data, err)
+		}
+	}
+	auth, err := NewAuthManager(dir)
+	if err != nil || !auth.IsMaster("AABBCCDD") || !auth.CanUnlock("04010203") {
+		t.Fatalf("physical credentials failed to load: %v", err)
+	}
+	phones, err := newPhoneKeys(dir)
+	if err != nil || !phones.has(der) {
+		t.Fatalf("phone credential failed to load: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "key_aliases.json"), []byte("not JSON"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newKeyAliases(dir); err == nil {
+		t.Fatal("invalid names file accepted")
+	}
+	auth, err = NewAuthManager(dir)
+	if err != nil || !auth.IsMaster("AABBCCDD") || !auth.CanUnlock("04010203") {
+		t.Fatalf("invalid names disabled physical credentials: %v", err)
+	}
+	phones, err = newPhoneKeys(dir)
+	if err != nil || !phones.has(der) {
+		t.Fatalf("invalid names disabled phone credentials: %v", err)
 	}
 }
 
