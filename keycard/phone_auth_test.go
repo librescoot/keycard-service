@@ -117,16 +117,13 @@ func TestPendingPhoneDuplicatePublishesFeedback(t *testing.T) {
 	if _, err := listener.Receive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	service.handlePhone(der)
-	service.handlePhone(der)
 	for _, expected := range []string{"phone-learned:", "phone-duplicate:"} {
-		select {
-		case msg := <-listener.Channel():
-			if msg == nil || !strings.HasPrefix(msg.Payload, expected) {
-				t.Fatalf("event = %v, want %q", msg, expected)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("missing %s event", expected)
+		service.handlePhone(der)
+		waitCtx, cancel := context.WithTimeout(ctx, time.Second)
+		msg, err := listener.ReceiveMessage(waitCtx)
+		cancel()
+		if err != nil || !strings.HasPrefix(msg.Payload, expected) {
+			t.Fatalf("event = %v, want %q: %v", msg, expected, err)
 		}
 	}
 	if len(service.newPhones) != 1 {
