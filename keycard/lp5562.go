@@ -111,10 +111,10 @@ func (l *LP5562) writeReg(reg, value uint8) error {
 }
 
 // applyConfigLocked writes the operating-mode, clock, enable and drive-current
-// registers. vehicle-service drives the same chip for the blinker indicator
-// (I2C_SLAVE_FORCE on the same bus and address) and leaves it on a lower drive
-// current with logarithmic dimming disabled, so re-assert our own settings
-// before every colour change rather than trusting the state we set at init.
+// registers. When the optional DBC blinker LED setting is enabled,
+// vehicle-service writes to this LP5562 (also through I2C_SLAVE_FORCE) and
+// its off frame changes the drive current and clock configuration. Re-assert
+// our settings before each colour change.
 func (l *LP5562) applyConfigLocked() error {
 	if err := l.writeReg(lp5562RegMiscConfig, lp5562PWMDirectControl); err != nil {
 		return fmt.Errorf("misc config failed: %w", err)

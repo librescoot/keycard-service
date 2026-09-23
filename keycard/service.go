@@ -244,6 +244,7 @@ func (s *Service) startDiscovery() error {
 }
 
 func isNFCIdleTimeout(err error) bool {
+	// pn7150 v0.1.10 returns an untyped timeout; newer HALs expose its code.
 	var nfcErr hal.NFCError
 	return errors.As(err, &nfcErr) && nfcErr.Code() == hal.ErrCodeI2CTimeout ||
 		err != nil && err.Error() == "timeout waiting for NFC device to become readable"
