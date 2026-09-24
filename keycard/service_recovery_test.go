@@ -148,29 +148,31 @@ func stopRecoveryTestService(t *testing.T, service *Service, nfc *recoveryTestNF
 }
 
 func TestPollNFCIdleTimeoutKeepsDiscoveryActive(t *testing.T) {
-	for name, timeoutErr := range map[string]error{
-		"released HAL": errors.New("timeout waiting for NFC device to become readable"),
-		"typed HAL":    hal.NewI2CTimeoutError("timeout waiting for NFC device to become readable"),
-	} {
-		t.Run(name, func(t *testing.T) {
-			service := newRecoveryTestService(t)
-			reader := &recoveryTestNFC{}
-			calls := 0
-			reader.awaitFunc = func() error {
-				calls++
-				if calls == 3 {
-					service.cancel()
-				}
-				return timeoutErr
-			}
-			service.nfc = reader
-			if err := service.pollNFC(); err != nil {
-				t.Fatal(err)
-			}
-			if reader.starts != 0 || calls != 3 {
-				t.Fatalf("starts = %d, polls = %d; want 0 starts, 3 polls", reader.starts, calls)
-			}
-		})
+	service := newRecoveryTestService(t)
+	reader := &recoveryTestNFC{}
+	calls := 0
+	reader.awaitFunc = func() error {
+		calls++
+		if calls == 3 {
+			service.cancel()
+		}
+		return hal.NewI2CTimeoutError("timeout waiting for NFC device to become readable")
+	}
+	service.nfc = reader
+	if err := service.pollNFC(); err != nil {
+		t.Fatal(err)
+	}
+	if reader.starts != 0 || calls != 3 {
+		t.Fatalf("starts = %d, polls = %d; want 0 starts, 3 polls", reader.starts, calls)
+	}
+}
+
+func TestPollNFCUntypedErrorTriggersReconnect(t *testing.T) {
+	service := newRecoveryTestService(t)
+	reader := &recoveryTestNFC{awaitError: errors.New("timeout waiting for NFC device to become readable")}
+	service.nfc = reader
+	if err := service.pollNFC(); err == nil {
+		t.Fatal("untyped error treated as an idle timeout")
 	}
 }
 
