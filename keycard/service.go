@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"syscall"
 	"time"
 
 	hal "github.com/librescoot/pn7150"
@@ -259,7 +260,7 @@ func (s *Service) pollNFC() error {
 			if s.ctx.Err() != nil {
 				return nil
 			}
-			if isNFCIdleTimeout(err) {
+			if isNFCIdleTimeout(err) || errors.Is(err, syscall.EINTR) {
 				continue
 			}
 			return fmt.Errorf("wait for NFC reader: %w", err)

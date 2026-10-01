@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -164,6 +165,33 @@ func TestPollNFCIdleTimeoutKeepsDiscoveryActive(t *testing.T) {
 	}
 	if reader.starts != 0 || calls != 3 {
 		t.Fatalf("starts = %d, polls = %d; want 0 starts, 3 polls", reader.starts, calls)
+	}
+}
+
+func TestPollNFCInterruptedWaitKeepsDiscoveryActive(t *testing.T) {
+	for _, wrapped := range []bool{false, true} {
+		t.Run(map[bool]string{false: "syscall", true: "wrapped"}[wrapped], func(t *testing.T) {
+			service := newRecoveryTestService(t)
+			defer service.cancel()
+			calls := 0
+			reader := &recoveryTestNFC{awaitFunc: func() error {
+				calls++
+				if calls == 3 {
+					return hal.NewI2CPollError("poll error", syscall.EIO)
+				}
+				if wrapped {
+					return hal.NewI2CPollError("poll error", syscall.EINTR)
+				}
+				return syscall.EINTR
+			}}
+			service.nfc = reader
+			if err := service.pollNFC(); !errors.Is(err, syscall.EIO) {
+				t.Fatalf("pollNFC error = %v, want EIO after interrupted waits", err)
+			}
+			if reader.starts != 0 || reader.closed != 0 || calls != 3 {
+				t.Fatalf("starts = %d, closes = %d, polls = %d; want 0, 0, 3", reader.starts, reader.closed, calls)
+			}
+		})
 	}
 }
 
