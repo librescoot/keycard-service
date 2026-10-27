@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// atomicWriteLines persists a complete UID list with write-sync-rename.
+// atomicWriteLines syncs both the UID contents and the renamed directory entry.
 func atomicWriteLines(path string, lines []string) error {
 	tmpPath := path + ".tmp"
 
@@ -37,7 +37,22 @@ func atomicWriteLines(path string, lines []string) error {
 		return err
 	}
 
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return syncParentDirectory(path)
+}
+
+func syncParentDirectory(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("open keycard directory: %w", err)
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("sync keycard directory: %w", err)
+	}
+	return nil
 }
 
 type AuthManager struct {

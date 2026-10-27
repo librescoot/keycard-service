@@ -136,8 +136,9 @@ func (a *keyAliases) save() error {
 	}
 	if err = os.Rename(tmp, a.path); err != nil {
 		_ = os.Remove(tmp)
+		return err
 	}
-	return err
+	return syncParentDirectory(a.path)
 }
 
 func (a *keyAliases) set(key, name string) error {

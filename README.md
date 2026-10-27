@@ -50,6 +50,8 @@ data directory, logging, and optional LP5562 I2C device/address.
 
 By default, UIDs are stored under `/data/keycard` in `master_uids.txt` and
 `authorized_uids.txt`, as bare uppercase hex. Separators are accepted on read.
+Credential files and names are saved with file synchronization, atomic rename,
+and parent-directory synchronization before success is reported.
 A `master_uids.txt` holding only `NONE` records that this vehicle wants no
 physical master. When no LP5562 device is configured, RGB card feedback is
 intentionally disabled. Learn-mode turn-signal indicators continue to use
