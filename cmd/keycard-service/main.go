@@ -74,19 +74,34 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		logger.Info("Received shutdown signal")
-		service.Stop()
-	}()
+	defer signal.Stop(sigChan)
 
 	logger.Info(fmt.Sprintf("librescoot-keycard %s starting", version),
 		"device", device,
 		"dataDir", dataDir,
 		"redis", redisAddr)
 
-	if err := service.Run(); err != nil {
+	if err := runService(service, sigChan, logger); err != nil {
 		fmt.Fprintf(os.Stderr, "Service error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// Stop must finish before main exits: Run returns as soon as cancellation is
+// observed, while Stop still has to hand off or stop the autonomous LED.
+func runService(service interface {
+	Run() error
+	Stop()
+}, signals <-chan os.Signal, logger *slog.Logger) error {
+	finished := make(chan error, 1)
+	go func() { finished <- service.Run() }()
+	select {
+	case <-signals:
+		logger.Info("Received shutdown signal")
+		service.Stop()
+		return <-finished
+	case err := <-finished:
+		service.Stop()
+		return err
 	}
 }
