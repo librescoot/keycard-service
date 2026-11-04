@@ -2,16 +2,11 @@ package keycard
 
 import "time"
 
-const (
-	alarmPulseOn  = 100 * time.Millisecond
-	alarmPulseOff = 1900 * time.Millisecond
-)
-
-var alarmPulseColor = LEDColor{Red: 80}
-
 type indicatorState struct {
 	closed             bool
 	alarm              bool
+	autonomous         bool
+	powerState         string
 	mode               string
 	fault              bool
 	foreground         bool
@@ -59,7 +54,7 @@ func (l *LP5562) renderLocked() error {
 		return l.patternStepLocked(ColorAmber, blinkInterval, blinkInterval, true, s.patternGeneration)
 	}
 	if s.alarm {
-		return l.patternStepLocked(alarmPulseColor, alarmPulseOn, alarmPulseOff, true, s.patternGeneration)
+		return l.startAlarmProgramLocked()
 	}
 	return l.applyColorLocked(ColorOff)
 }

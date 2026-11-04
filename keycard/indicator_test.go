@@ -53,12 +53,12 @@ func wantColor(t *testing.T, r *indicatorRegisters, want LEDColor) {
 func TestAlarmBackgroundYieldsAndRestores(t *testing.T) {
 	l, r := testIndicator(t)
 	l.SetAlarmIndicator(true)
-	wantColor(t, r, alarmPulseColor)
+	wantAlarmProgram(t, l, r)
 	_ = l.Green()
 	l.ReleaseAfter(time.Hour)
 	wantColor(t, r, ColorGreen)
 	finishFeedback(l)
-	wantColor(t, r, alarmPulseColor)
+	wantAlarmProgram(t, l, r)
 	_ = l.Green()
 	l.ReleaseAfter(time.Hour)
 	l.SetAlarmIndicator(false)
@@ -104,7 +104,7 @@ func TestAlarmTimerCannotOverwriteCardFeedback(t *testing.T) {
 	l, r := testIndicator(t)
 	l.SetAlarmIndicator(true)
 	_ = l.Green()
-	time.Sleep(alarmPulseOn + 30*time.Millisecond)
+	time.Sleep(130 * time.Millisecond)
 	wantColor(t, r, ColorGreen)
 	_ = l.Close()
 	r.mu.Lock()
@@ -135,7 +135,7 @@ func TestAlarmIndicatorGate(t *testing.T) {
 		{"true", "armed", "ready-to-drive", false},
 		{"true", "armed", "", false},
 	} {
-		if got := alarmIndicatorEnabled(tc.setting, tc.alarm, tc.vehicle); got != tc.want {
+		if got := alarmIndicatorEnabled(tc.setting, tc.alarm, tc.vehicle, "running"); got != tc.want {
 			t.Fatalf("%+v: %v", tc, got)
 		}
 	}
@@ -145,6 +145,7 @@ func TestAlarmIndicatorRedisStartupAndUpdates(t *testing.T) {
 	server.HSet("settings", alarmLEDSetting, "true")
 	server.HSet("alarm", "status", "armed")
 	server.HSet("vehicle", "state", "stand-by")
+	server.HSet("power-manager", "state", "running")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client, err := NewRedisClient(server.Addr(), logger)
 	if err != nil {
@@ -181,9 +182,28 @@ func TestAlarmIndicatorRedisStartupAndUpdates(t *testing.T) {
 	server.HSet("settings", alarmLEDSetting, "false")
 	server.Publish("settings", alarmLEDSetting)
 	wait(false)
+	server.Close()
+	server.HSet("settings", alarmLEDSetting, "true")
+	if err := server.Restart(); err != nil {
+		t.Fatal(err)
+	}
+	wait(true)
 	cancel()
 	select {
 	case <-done:
+		l.mu.Lock()
+		armed := l.indicator.alarm
+		l.mu.Unlock()
+		if !armed {
+			t.Fatal("watcher cancellation erased the shutdown indication")
+		}
+		s.refreshAlarmIndicator(ctx)
+		l.mu.Lock()
+		armed = l.indicator.alarm
+		l.mu.Unlock()
+		if !armed {
+			t.Fatal("cancelled snapshot erased the shutdown indication")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("LED watcher did not stop")
 	}

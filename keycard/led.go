@@ -34,6 +34,7 @@ type RGBLed interface {
 	SetAlarmIndicator(bool)
 	SetFeedbackMode(string)
 	SetNFCFault(bool)
+	SetPowerState(string)
 }
 
 // noOpRGBLed intentionally disables RGB card feedback when no usable LP5562
@@ -53,6 +54,7 @@ func (noOpRGBLed) ReleaseAfter(time.Duration) {}
 func (noOpRGBLed) SetAlarmIndicator(bool)     {}
 func (noOpRGBLed) SetFeedbackMode(string)     {}
 func (noOpRGBLed) SetNFCFault(bool)           {}
+func (noOpRGBLed) SetPowerState(string)       {}
 
 // LEDController controls turn-signal indicators for learn mode.
 type LEDController struct {

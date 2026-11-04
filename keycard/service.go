@@ -410,6 +410,11 @@ func (s *Service) Stop() {
 	}
 
 	s.indicatorWG.Wait()
+	// Resolve a poweroff announcement that raced subscription cancellation.
+	// The unit stops before Valkey; refresh uses its own bounded context.
+	if s.redis != nil {
+		s.refreshAlarmIndicator(context.Background())
+	}
 	if s.rgbLed != nil {
 		if err := s.rgbLed.Close(); err != nil {
 			s.logger.Warn("Failed to close LED", "error", err)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -20,13 +21,13 @@ const (
 	lp5562RegReset       = 0x0D
 	lp5562RegPWMConfig   = 0x70
 
-	lp5562EnableChip       = 0xC0 // bit6=CHIP_EN, bit7=OUTPUT_EN
+	lp5562EnableChip       = 0xC0 // bit6=CHIP_EN, bit7=logarithmic PWM
 	lp5562ResetValue       = 0xFF
 	lp5562PWMDirectControl = 0x3F
 	lp5562PWMOverI2C       = 0x00
-	lp5562InternalClock    = 0x61 // bit0=internal clock, bit5+6=PWM clock enable
+	lp5562InternalClock    = 0x61 // Internal clock, power save, high-frequency PWM.
 
-	lp5562DefaultCurrent = 0xAF // Approximately 175, matching the hardware reference.
+	lp5562DefaultCurrent = 0xAF // 17.5 mA at 100 microamps per step.
 )
 
 // LP5562 channel order is amber, green, red.
@@ -121,6 +122,7 @@ func (l *LP5562) applyConfigLocked() error {
 	if err := l.writeReg(lp5562RegMiscConfig, lp5562PWMDirectControl); err != nil {
 		return fmt.Errorf("misc config failed: %w", err)
 	}
+	time.Sleep(200 * time.Microsecond)
 
 	if err := l.writeReg(lp5562RegPWMConfig, lp5562PWMOverI2C); err != nil {
 		return fmt.Errorf("PWM config failed: %w", err)
@@ -133,6 +135,7 @@ func (l *LP5562) applyConfigLocked() error {
 	if err := l.writeReg(lp5562RegEnable, lp5562EnableChip); err != nil {
 		return fmt.Errorf("enable failed: %w", err)
 	}
+	time.Sleep(500 * time.Microsecond)
 
 	for i := uint8(0); i < 3; i++ {
 		if err := l.writeReg(lp5562RegCurrentBase+i, lp5562DefaultCurrent); err != nil {
@@ -150,6 +153,7 @@ func (l *LP5562) init() error {
 	if err := l.writeReg(lp5562RegReset, lp5562ResetValue); err != nil {
 		return fmt.Errorf("reset failed: %w", err)
 	}
+	time.Sleep(time.Millisecond)
 
 	if err := l.applyConfigLocked(); err != nil {
 		return err
@@ -181,6 +185,12 @@ func (l *LP5562) setColorLocked(color LEDColor) error {
 }
 
 func (l *LP5562) applyColorLocked(color LEDColor) error {
+	if l.indicator.autonomous {
+		if err := l.haltProgramLocked(); err != nil {
+			return err
+		}
+		l.indicator.autonomous = false
+	}
 	if err := l.applyConfigLocked(); err != nil {
 		return err
 	}
@@ -202,7 +212,12 @@ func (l *LP5562) Close() error {
 	l.cancelFeedbackLocked()
 	l.cancelPatternLocked()
 	l.indicator.closed = true
-	_ = l.setColorLocked(ColorOff)
+	keepAlarm := l.indicator.autonomous && l.indicator.alarm &&
+		!l.indicator.foreground && !l.indicator.fault && l.indicator.mode == "" &&
+		poweringOff(l.indicator.powerState)
+	if !keepAlarm {
+		l.logIfErr(l.applyColorLocked(ColorOff))
+	}
 	if l.fd < 0 {
 		return nil
 	}

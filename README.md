@@ -123,10 +123,23 @@ hardware and Redis dependencies.
 ## Alarm armed indicator
 
 `settings[alarm.armed-led]` is an opt-in boolean, default `false`. When enabled,
-`alarm[status]=armed` and `vehicle[state]=stand-by` select a dim red pulse:
-100 ms on, 1900 ms off. Card feedback, enrollment and NFC fault indications
-have priority; when they finish, the current background indication resumes.
-The background uses host timers and does not continue during system suspend.
+`alarm[status]=armed` and a stand-by or `waiting-hibernation*` vehicle state
+select a dim red pulse, approximately 94 ms on every 2 seconds. Parked, drive,
+unknown and other vehicle states suppress it. The power-manager state must also
+be a recognized running, suspend or hibernation state.
+
+Card feedback, enrollment and NFC fault indications have priority; when they
+finish, the current background indication resumes. The LP5562 runs the alarm
+pulse autonomously on engine 3, with no periodic host writes or suspend inhibitor.
+A low-power announcement ends temporary flashes before the host sleeps; persistent
+enrollment and fault indications still take priority. Power-state transitions
+reapply the desired indication, including after resume.
+
+Ordinary service shutdown stops the pattern. During an announced hibernation
+poweroff, shutdown leaves an eligible autonomous alarm pattern running. This
+continues only while the chip's supply and enable remain available; it does not
+keep a powered-down LED rail alive. Startup initializes the chip and reconstructs
+the indication from current state.
 
 The service reads initial state and refreshes it on Redis notifications and
 reconnection. Missing or unavailable state disables the background indication.

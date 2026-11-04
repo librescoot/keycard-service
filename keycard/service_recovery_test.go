@@ -76,6 +76,7 @@ func (*recoveryTestLED) ReleaseAfter(time.Duration) {}
 func (*recoveryTestLED) SetAlarmIndicator(bool)     {}
 func (*recoveryTestLED) SetFeedbackMode(string)     {}
 func (*recoveryTestLED) SetNFCFault(bool)           {}
+func (*recoveryTestLED) SetPowerState(string)       {}
 func (l *recoveryTestLED) Close() error             { return nil }
 func (l *recoveryTestLED) Red() error               { l.red++; return nil }
 func (l *recoveryTestLED) Green() error             { return nil }

@@ -23,6 +23,7 @@ func (*exclusivityTestLED) ReleaseAfter(time.Duration) {}
 func (*exclusivityTestLED) SetAlarmIndicator(bool)     {}
 func (*exclusivityTestLED) SetFeedbackMode(string)     {}
 func (*exclusivityTestLED) SetNFCFault(bool)           {}
+func (*exclusivityTestLED) SetPowerState(string)       {}
 func (*exclusivityTestLED) Close() error               { return nil }
 func (l *exclusivityTestLED) Red() error               { l.red.Add(1); return nil }
 func (*exclusivityTestLED) Green() error               { return nil }
