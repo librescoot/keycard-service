@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -62,9 +63,10 @@ type Service struct {
 	currentCardUID string // Empty when no card is present.
 	nfcFaultActive bool
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	indicatorWG sync.WaitGroup
 }
 
 func NewService(config *Config, logger *slog.Logger) (*Service, error) {
@@ -119,6 +121,7 @@ func NewService(config *Config, logger *slog.Logger) (*Service, error) {
 	s.redis, err = NewRedisClient(config.RedisAddr, logger)
 	if err != nil {
 		cancel()
+		_ = s.rgbLed.Close()
 		return nil, fmt.Errorf("failed to create redis client: %w", err)
 	}
 
@@ -167,6 +170,10 @@ func (s *Service) Run() error {
 		}
 	}
 	go s.watchCommands(s.ctx)
+	if s.redis != nil {
+		s.indicatorWG.Add(1)
+		go func() { defer s.indicatorWG.Done(); s.watchAlarmIndicator(s.ctx) }()
+	}
 
 	backoff := time.Second
 	for {
@@ -359,6 +366,7 @@ func (s *Service) handleNFCFailure(err error) {
 		return
 	}
 	s.nfcFaultActive = true
+	s.rgbLed.SetNFCFault(true)
 	if err := s.rgbLed.Red(); err != nil {
 		s.logger.Warn("Failed to set NFC fault LED", "error", err)
 	}
@@ -371,6 +379,7 @@ func (s *Service) clearNFCFaultIndication() {
 	}
 	s.nfcFaultActive = false
 	s.rgbLed.StopBlink()
+	s.rgbLed.SetNFCFault(false)
 	if s.masterBootstrapMode || s.masterTeachInMode {
 		if err := s.rgbLed.Amber(); err != nil {
 			s.logger.Warn("Failed to restore NFC LED", "error", err)
@@ -400,6 +409,7 @@ func (s *Service) Stop() {
 		s.logger.Warn("Stop: timed out waiting for Run() to return")
 	}
 
+	s.indicatorWG.Wait()
 	if s.rgbLed != nil {
 		if err := s.rgbLed.Close(); err != nil {
 			s.logger.Warn("Failed to close LED", "error", err)
@@ -416,11 +426,7 @@ func (s *Service) flashLED(setColor func() error, duration time.Duration) {
 	if err := setColor(); err != nil {
 		s.logger.Warn("Failed to set LED", "error", err)
 	}
-	time.AfterFunc(duration, func() {
-		if err := s.rgbLed.Off(); err != nil {
-			s.logger.Warn("Failed to set LED", "error", err)
-		}
-	})
+	s.rgbLed.ReleaseAfter(duration)
 }
 
 func (s *Service) handleTagArrival(uid string) {
@@ -626,6 +632,9 @@ func (s *Service) publishKeycardSnapshot() {
 }
 
 func (s *Service) publishLearnState(state string) {
+	if s.rgbLed != nil {
+		s.rgbLed.SetFeedbackMode(state)
+	}
 	if s.redis == nil {
 		return
 	}
@@ -730,11 +739,7 @@ func (s *Service) learnUID(uid string) {
 	if err := s.rgbLed.Green(); err != nil {
 		s.logger.Warn("Failed to set LED", "error", err)
 	}
-	time.AfterFunc(flashDuration, func() {
-		if err := s.rgbLed.Amber(); err != nil {
-			s.logger.Warn("Failed to set LED", "error", err)
-		}
-	})
+	s.rgbLed.ReleaseAfter(flashDuration)
 	s.logger.Info("UID learned", "uid", uid)
 	s.publishEvent("card-learned:" + uid)
 }

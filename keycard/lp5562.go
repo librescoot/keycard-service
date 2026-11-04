@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -43,13 +42,13 @@ var (
 )
 
 type LP5562 struct {
-	mu        sync.Mutex
-	fd        int
-	logger    *slog.Logger
-	address   uint8
-	color     LEDColor // Color restored by On after a temporary Off.
-	blinkStop chan struct{}
-	blinking  bool
+	mu            sync.Mutex
+	fd            int
+	logger        *slog.Logger
+	address       uint8
+	color         LEDColor
+	indicator     indicatorState
+	writeRegister func(uint8, uint8) error // Optional transport for register-level tests.
 }
 
 func NewLP5562(device string, address uint8, logger *slog.Logger) (*LP5562, error) {
@@ -99,6 +98,9 @@ func (l *LP5562) setSlaveAddress() error {
 }
 
 func (l *LP5562) writeReg(reg, value uint8) error {
+	if l.writeRegister != nil {
+		return l.writeRegister(reg, value)
+	}
 	buf := []byte{reg, value}
 	n, err := unix.Write(l.fd, buf)
 	if err != nil {
@@ -178,104 +180,33 @@ func (l *LP5562) setColorLocked(color LEDColor) error {
 	return nil
 }
 
-func (l *LP5562) SetColor(color LEDColor) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (l *LP5562) applyColorLocked(color LEDColor) error {
 	if err := l.applyConfigLocked(); err != nil {
 		return err
 	}
 	return l.setColorLocked(color)
 }
 
-func (l *LP5562) Off() error {
-	return l.SetColor(ColorOff)
-}
-
-func (l *LP5562) Red() error {
-	return l.SetColor(ColorRed)
-}
-
-func (l *LP5562) Green() error {
-	return l.SetColor(ColorGreen)
-}
-
-func (l *LP5562) Amber() error {
-	return l.SetColor(ColorAmber)
-}
-
-func (l *LP5562) On() error {
-	return l.SetColor(l.color)
-}
-
-// logIfErr logs I2C failures from LED state changes. The scooter keeps
-// working with a dark or stuck indicator, so these are surfaced but never
-// propagated to the caller.
 func (l *LP5562) logIfErr(err error) {
 	if err != nil && l.logger != nil {
 		l.logger.Warn("LP5562 I2C write failed", "error", err)
 	}
 }
 
-func (l *LP5562) Flash(duration time.Duration) {
-	l.logIfErr(l.On())
-	time.AfterFunc(duration, func() {
-		l.logIfErr(l.Off())
-	})
-}
-
-func (l *LP5562) StartBlink(interval time.Duration) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.blinking {
-		return
-	}
-
-	l.blinking = true
-	l.blinkStop = make(chan struct{})
-
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		state := false
-		for {
-			select {
-			case <-l.blinkStop:
-				l.logIfErr(l.Off())
-				return
-			case <-ticker.C:
-				if state {
-					l.logIfErr(l.Off())
-				} else {
-					l.logIfErr(l.On())
-				}
-				state = !state
-			}
-		}
-	}()
-}
-
-func (l *LP5562) StopBlink() {
-	l.mu.Lock()
-	if !l.blinking {
-		l.mu.Unlock()
-		return
-	}
-
-	stopChan := l.blinkStop
-	l.blinking = false
-	l.mu.Unlock()
-
-	close(stopChan)
-}
-
 func (l *LP5562) Close() error {
-	l.StopBlink()
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
+	if l.indicator.closed {
+		return nil
+	}
+	l.cancelFeedbackLocked()
+	l.cancelPatternLocked()
+	l.indicator.closed = true
 	_ = l.setColorLocked(ColorOff)
-	return unix.Close(l.fd)
+	if l.fd < 0 {
+		return nil
+	}
+	err := unix.Close(l.fd)
+	l.fd = -1
+	return err
 }

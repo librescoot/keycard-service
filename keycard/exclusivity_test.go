@@ -14,15 +14,19 @@ type exclusivityTestLED struct {
 	red atomic.Int32
 }
 
-func (*exclusivityTestLED) On() error                { return nil }
-func (*exclusivityTestLED) Off() error               { return nil }
-func (*exclusivityTestLED) Flash(time.Duration)      {}
-func (*exclusivityTestLED) StartBlink(time.Duration) {}
-func (*exclusivityTestLED) StopBlink()               {}
-func (*exclusivityTestLED) Close() error             { return nil }
-func (l *exclusivityTestLED) Red() error             { l.red.Add(1); return nil }
-func (*exclusivityTestLED) Green() error             { return nil }
-func (*exclusivityTestLED) Amber() error             { return nil }
+func (*exclusivityTestLED) On() error                  { return nil }
+func (*exclusivityTestLED) Off() error                 { return nil }
+func (*exclusivityTestLED) Flash(time.Duration)        {}
+func (*exclusivityTestLED) StartBlink(time.Duration)   {}
+func (*exclusivityTestLED) StopBlink()                 {}
+func (*exclusivityTestLED) ReleaseAfter(time.Duration) {}
+func (*exclusivityTestLED) SetAlarmIndicator(bool)     {}
+func (*exclusivityTestLED) SetFeedbackMode(string)     {}
+func (*exclusivityTestLED) SetNFCFault(bool)           {}
+func (*exclusivityTestLED) Close() error               { return nil }
+func (l *exclusivityTestLED) Red() error               { l.red.Add(1); return nil }
+func (*exclusivityTestLED) Green() error               { return nil }
+func (*exclusivityTestLED) Amber() error               { return nil }
 
 func newExclusivityTestService(t *testing.T) (*Service, *miniredis.Miniredis) {
 	t.Helper()

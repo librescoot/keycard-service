@@ -72,6 +72,10 @@ func (l *recoveryTestLED) Off() error               { return nil }
 func (l *recoveryTestLED) Flash(time.Duration)      {}
 func (l *recoveryTestLED) StartBlink(time.Duration) { l.starts++ }
 func (l *recoveryTestLED) StopBlink()               { l.stops++ }
+func (*recoveryTestLED) ReleaseAfter(time.Duration) {}
+func (*recoveryTestLED) SetAlarmIndicator(bool)     {}
+func (*recoveryTestLED) SetFeedbackMode(string)     {}
+func (*recoveryTestLED) SetNFCFault(bool)           {}
 func (l *recoveryTestLED) Close() error             { return nil }
 func (l *recoveryTestLED) Red() error               { l.red++; return nil }
 func (l *recoveryTestLED) Green() error             { return nil }

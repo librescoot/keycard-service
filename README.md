@@ -120,6 +120,20 @@ make lint         # requires golangci-lint
 `make run` starts the service through `go run`; it still needs its configured
 hardware and Redis dependencies.
 
+## Alarm armed indicator
+
+`settings[alarm.armed-led]` is an opt-in boolean, default `false`. When enabled,
+`alarm[status]=armed` and `vehicle[state]=stand-by` select a dim red pulse:
+100 ms on, 1900 ms off. Card feedback, enrollment and NFC fault indications
+have priority; when they finish, the current background indication resumes.
+The background uses host timers and does not continue during system suspend.
+
+The service reads initial state and refreshes it on Redis notifications and
+reconnection. Missing or unavailable state disables the background indication.
+LED errors do not change authentication. The optional vehicle-service dashboard
+blinker mirror may overwrite this best-effort indication; there is no
+cross-service LED ownership protocol.
+
 ## Deployment and operations
 
 The Yocto layer ships `librescoot-keycard.service`, which requires Valkey,

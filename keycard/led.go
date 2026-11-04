@@ -30,21 +30,29 @@ type RGBLed interface {
 	Red() error
 	Green() error
 	Amber() error
+	ReleaseAfter(time.Duration)
+	SetAlarmIndicator(bool)
+	SetFeedbackMode(string)
+	SetNFCFault(bool)
 }
 
 // noOpRGBLed intentionally disables RGB card feedback when no usable LP5562
 // device is configured. It has no state or background work.
 type noOpRGBLed struct{}
 
-func (noOpRGBLed) On() error                { return nil }
-func (noOpRGBLed) Off() error               { return nil }
-func (noOpRGBLed) Flash(time.Duration)      {}
-func (noOpRGBLed) StartBlink(time.Duration) {}
-func (noOpRGBLed) StopBlink()               {}
-func (noOpRGBLed) Close() error             { return nil }
-func (noOpRGBLed) Red() error               { return nil }
-func (noOpRGBLed) Green() error             { return nil }
-func (noOpRGBLed) Amber() error             { return nil }
+func (noOpRGBLed) On() error                  { return nil }
+func (noOpRGBLed) Off() error                 { return nil }
+func (noOpRGBLed) Flash(time.Duration)        {}
+func (noOpRGBLed) StartBlink(time.Duration)   {}
+func (noOpRGBLed) StopBlink()                 {}
+func (noOpRGBLed) Close() error               { return nil }
+func (noOpRGBLed) Red() error                 { return nil }
+func (noOpRGBLed) Green() error               { return nil }
+func (noOpRGBLed) Amber() error               { return nil }
+func (noOpRGBLed) ReleaseAfter(time.Duration) {}
+func (noOpRGBLed) SetAlarmIndicator(bool)     {}
+func (noOpRGBLed) SetFeedbackMode(string)     {}
+func (noOpRGBLed) SetNFCFault(bool)           {}
 
 // LEDController controls turn-signal indicators for learn mode.
 type LEDController struct {
