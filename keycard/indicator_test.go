@@ -135,7 +135,7 @@ func TestAlarmIndicatorGate(t *testing.T) {
 		{"true", "armed", "ready-to-drive", false},
 		{"true", "armed", "", false},
 	} {
-		if got := alarmIndicatorEnabled(tc.setting, tc.alarm, tc.vehicle, "running"); got != tc.want {
+		if got := alarmIndicatorEnabled(tc.setting, "true", tc.alarm, tc.vehicle, "running"); got != tc.want {
 			t.Fatalf("%+v: %v", tc, got)
 		}
 	}
@@ -179,6 +179,16 @@ func TestAlarmIndicatorRedisStartupAndUpdates(t *testing.T) {
 	server.HSet("vehicle", "state", "stand-by")
 	server.Publish("vehicle", "state")
 	wait(true)
+	server.HSet("settings", alarmLEDHibernateSetting, "false")
+	server.Publish("settings", alarmLEDHibernateSetting)
+	server.HSet("power-manager", "state", "hibernating-for-imminent")
+	server.Publish("power-manager", "state")
+	wait(false)
+	server.HSet("settings", alarmLEDHibernateSetting, "true")
+	server.Publish("settings", alarmLEDHibernateSetting)
+	wait(true)
+	server.HSet("power-manager", "state", "running")
+	server.Publish("power-manager", "state")
 	server.HSet("settings", alarmLEDSetting, "false")
 	server.Publish("settings", alarmLEDSetting)
 	wait(false)

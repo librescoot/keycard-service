@@ -124,18 +124,18 @@ func TestLowPowerIndicatorEligibility(t *testing.T) {
 	powers := []string{"running", "suspending-pending", "suspending-imminent", "suspending", "hibernating", "hibernating-manual-imminent", "hibernating-timer-pending", "hibernating-for"}
 	for _, power := range powers {
 		for _, vehicle := range []string{"stand-by", "waiting-hibernation", "waiting-hibernation-advanced", "waiting-hibernation-seatbox", "waiting-hibernation-confirm"} {
-			if !alarmIndicatorEnabled("true", "armed", vehicle, power) {
+			if !alarmIndicatorEnabled("true", "true", "armed", vehicle, power) {
 				t.Fatalf("disabled for %s/%s", vehicle, power)
 			}
 		}
 		for _, vehicle := range []string{"parked", "ready-to-drive", "hop-on", "waiting-seatbox", "updating", "shutting-down", ""} {
-			if alarmIndicatorEnabled("true", "armed", vehicle, power) {
+			if alarmIndicatorEnabled("true", "true", "armed", vehicle, power) {
 				t.Fatalf("enabled for %s/%s", vehicle, power)
 			}
 		}
 	}
 	for _, power := range []string{"", "unknown", "reboot", "reboot-imminent"} {
-		if alarmIndicatorEnabled("true", "armed", "stand-by", power) {
+		if alarmIndicatorEnabled("true", "true", "armed", "stand-by", power) {
 			t.Fatalf("enabled with power=%q", power)
 		}
 	}
