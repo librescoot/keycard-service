@@ -72,6 +72,12 @@ Android requires NFC and HCE support and may require the screen to be unlocked;
 this implementation explicitly requires both screen on and device unlocked.
 There is no iOS/Apple Watch HCE implementation in this branch.
 
+A 4-byte UID whose first byte is `08` is an ISO 14443-3 random ID. During learn
+mode, master teach-in and master bootstrap, the first such tap is discarded and
+`card-random-id:<uid>` is published on `keycard:events`. Presenting the same UID
+again enrolls it. A phone that does not answer as a phone key normally presents a
+new random ID on each tap and is therefore never enrolled by accident.
+
 Optional credential names are stored in `/data/keycard/key_aliases.json`, keyed by
 `card:<UID>` (including master cards) or `phone:<32-hex-fingerprint>`. Names
 are UTF-8, up to 32 bytes, and never participate in authentication. The

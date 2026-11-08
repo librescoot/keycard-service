@@ -57,6 +57,7 @@ type Service struct {
 	masterBootstrapMode bool
 	masterTeachInMode   bool
 	learnMode           bool
+	randomUIDPending    string
 	newUIDs             []string
 	newPhones           [][]byte
 
@@ -472,6 +473,7 @@ func (s *Service) handleTagArrival(uid string) {
 func (s *Service) enterMasterBootstrap() {
 	s.logger.Info("Entering master bootstrap - the next card presented becomes master")
 	s.masterBootstrapMode = true
+	s.randomUIDPending = ""
 	s.rgbLed.StartBlink(blinkInterval)
 	s.publishLearnState("master-bootstrap")
 	s.publishEvent("mode-entered:master-bootstrap:boot")
@@ -483,6 +485,7 @@ func (s *Service) cancelMasterBootstrap(trigger string) {
 		return
 	}
 	s.masterBootstrapMode = false
+	s.randomUIDPending = ""
 	s.rgbLed.StopBlink()
 	if err := s.rgbLed.Off(); err != nil {
 		s.logger.Warn("Failed to set LED", "error", err)
@@ -493,6 +496,9 @@ func (s *Service) cancelMasterBootstrap(trigger string) {
 }
 
 func (s *Service) bootstrapMasterUID(uid string) {
+	if !s.acceptEnrollmentUID(uid) {
+		return
+	}
 	s.logger.Info("Learning master UID", "uid", uid)
 
 	if err := s.auth.SetMaster(uid); err != nil {
@@ -524,6 +530,7 @@ func (s *Service) bootstrapMasterUID(uid string) {
 func (s *Service) enterMasterTeachIn() {
 	s.logger.Info("Entering master teach-in mode - present a fresh card to register as master")
 	s.masterTeachInMode = true
+	s.randomUIDPending = ""
 	s.rgbLed.StartBlink(blinkInterval)
 	s.publishLearnState("master-teach-in")
 	s.publishEvent("mode-entered:master")
@@ -531,6 +538,7 @@ func (s *Service) enterMasterTeachIn() {
 
 func (s *Service) exitMasterTeachIn() {
 	s.masterTeachInMode = false
+	s.randomUIDPending = ""
 	s.rgbLed.StopBlink()
 	s.publishLearnState("idle")
 	s.publishEvent("mode-exited:master")
@@ -543,6 +551,10 @@ func (s *Service) teachInMasterUID(uid string) {
 		s.logger.Info("Master teach-in rejected: UID already registered", "uid", uid)
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		s.publishEvent("rejected:already-authorized:" + uid)
+		return
+	}
+
+	if !s.acceptEnrollmentUID(uid) {
 		return
 	}
 
@@ -651,6 +663,7 @@ func (s *Service) publishLearnState(state string) {
 func (s *Service) enterLearnMode(trigger string) {
 	s.logger.Info("Entering learn mode - present cards to authorize", "trigger", trigger)
 	s.learnMode = true
+	s.randomUIDPending = ""
 	s.newUIDs = nil
 	s.newPhones = nil
 	s.blinkerLed.LedLinearOn(Led3)
@@ -709,6 +722,7 @@ func (s *Service) exitLearnMode(trigger string) {
 	}
 
 	s.learnMode = false
+	s.randomUIDPending = ""
 	s.publishLearnState("idle")
 	s.blinkerLed.LedLinearOff(Led3)
 	s.blinkerLed.LedLinearOff(Led7)
@@ -737,6 +751,10 @@ func (s *Service) learnUID(uid string) {
 		s.logger.Info("UID rejected as duplicate", "uid", uid)
 		s.flashLED(s.rgbLed.Red, flashDuration)
 		s.publishEvent("card-duplicate:" + uid)
+		return
+	}
+
+	if !s.acceptEnrollmentUID(uid) {
 		return
 	}
 
