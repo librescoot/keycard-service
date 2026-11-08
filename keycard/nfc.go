@@ -42,7 +42,7 @@ func newPN7150NFC(config *Config, logger *slog.Logger) (nfcReader, error) {
 		}
 	}
 
-	nfc, err := hal.NewPN7150(config.Device, logCallback, nil, true, false, config.Debug)
+	nfc, err := hal.NewPN7150(config.Device, logCallback, nil, true, true, config.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("create NFC HAL: %w", err)
 	}
